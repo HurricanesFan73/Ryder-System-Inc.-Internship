@@ -1,0 +1,1497 @@
+/* FINDING POPULATION IN QUESTION
+
+   First Query: 
+   Returns all rows within the specified columns 
+   where 1)age is between 1 and 60 months old (5 years)
+  		 2)the product line is FSL
+		 3)the SAM class is 170
+		 4)is operating in the US
+		 
+   Stores the result into a table titled 
+   PM_Optimization_Table_1_170 in the fms_fin_sandbox database*/
+   	
+select 
+	yr_mnth_int,
+	product_line_sam_cd ,
+	vehicle_nbr,
+	vehicle_corrected_age,
+	vehicle_sam_class_cd
+into fms_fin_sandbox.sasetl.PM_Optimization_Table_1_170
+from fms_ops_fin.admin.v_active_monthend_fleet
+where
+	vehicle_corrected_age between 1 and 60 and
+	product_line_sam_cd in('FSL') and
+	vehicle_sam_class_cd = 170 and
+	country_cd = 1
+order by 1,3;
+
+select count(distinct vehicle_nbr)from pm_optimization_table_1_170; -- 53294
+/* Second Query:
+   Returns the vehicle #'s' from PM_Optimization_Table_1_170
+   that have at least 60 data points.
+   
+   Stores the result in a table called PM Optimization Table 2 170
+   in the fms_fin_sandbox database*/
+   
+select vehicle_nbr 
+into fms_fin_sandbox.sasetl.PM_Optimization_Table_2_170
+from fms_fin_sandbox.sasetl.PM_Optimization_Table_1_170
+group by vehicle_nbr 
+having count(vehicle_nbr) = 60;
+
+select count(distinct vehicle_nbr) from PM_Optimization_Table_2_170; -- 15349
+/* Third Query:
+   Returns specific columns on each individual vehicle
+   that is represented in the PM Optimization Table 2 170
+   and has spent the entirety of its life (even beyond 5 years)
+   in FSL
+   
+   Stores the result in a table called PM Optimization Table 3 170
+   in the fms_fin_sandbox database. This is the result */
+   
+select 
+	month_end_dt,
+	vehicle_nbr,
+	product_line_sam_cd,
+	vehicle_sam_class_cd,
+	vehicle_corrected_age,
+	odometer_rdr_corrected,
+	equivalent_unit,
+	acct_status_cd,
+	tracking_cd,
+	tracking_cd_chg_dt,
+	major_equipment_purchase_cd,
+	lift_gate_flg,
+	revenue_status_cd,
+	reuse_flg,
+	veh_domicle_location_cd,
+	vehicle_chas_mdl_yr_no,
+	vehicle_inservice_dt,
+	outsrvc_begin_dt,
+	utc_accept_crtd_dt,
+	utc_accept_dt,
+	sold_dt,
+	country_cd,
+	cbu_cd,
+	cbu_desc,
+	region_cd,
+	region_desc,
+	active_flg,
+	fleet_detail_key,
+	fleet_key,
+	vehicle_spec_detail_key
+	dom_loc_hier_dim_key,
+	epa_tech_year,
+	miles_driven_month,
+	average_ltd_miles
+into fms_fin_sandbox.sasetl.PM_Optimization_Table_3_170
+from fms_ops_fin.admin.v_active_monthend_fleet
+where vehicle_nbr in
+	(select distinct vehicle_nbr
+	 from fms_fin_sandbox.sasetl.PM_Optimization_Table_2_170) 
+and product_line_sam_cd in('FSL');
+
+select*from pm_optimization_table_3_170;
+select count(distinct vehicle_nbr) from pm_optimization_table_3_170;
+/*----------------------------------------------------------------------------------------------------------------------*/
+
+/* FINDING RELEVANT STATS ON POPULATION*/
+
+/* Getting lift gate flg count by region*/
+select lift_gate_flg,count(distinct vehicle_nbr), region_desc
+from fms_fin_sandbox.sasetl.PM_OPtimization_Table_3_170
+where region_cd in ('3472O','3476O','3488O','3450O') and lift_gate_flg is not null
+group by 1,3
+order by 1;
+
+/* Getting # of distinct vehicles grouped by year*/
+select 
+	case when ceil(vehicle_corrected_age*1.0/12.0)>10 then 10 else ceil(vehicle_corrected_age*1.0/12.0) end as ageyr,
+	count(distinct vehicle_nbr)
+from fms_fin_sandbox.sasetl.pm_optimization_table_3_170
+where vehicle_corrected_age > 0
+group by 1
+order by 1 ;
+
+/* Getting distribution of average vehicle's annual mileage readings by age and volume */
+select 
+	case when ceil(vehicle_corrected_age*1.0/12.0)>10 then 10 else ceil(vehicle_corrected_age*1.0/12.0) end as ageyr,
+	sum(miles_driven_month)/count(distinct vehicle_nbr) as ann_miles,
+	count(distinct vehicle_nbr) as vehicles
+from fms_fin_sandbox.sasetl.pm_optimization_table_3_170
+where vehicle_corrected_age>0
+group by 1
+order by 1,2;
+
+/* Getting distribution of average vehicle's projected annual mileage readings by age, volume, and region*/
+select 
+	case 
+		when ceil(vehicle_corrected_age*1.0/12.0)>10 then 10
+		else ceil(vehicle_corrected_age*1.0/12.0)
+	end as ageyr,
+	region_desc,
+	avg(miles_driven_month)*12 as ann_proj_mi,
+	count(distinct vehicle_nbr) as vehicles
+from fms_fin_sandbox.sasetl.pm_optimization_table_3_170
+where 
+	miles_driven_month is not null and
+	region_cd in ('3472O','3476O','3488O','3450O') and
+    ageyr > 0
+group by 1,2
+order by 1,2;
+
+--/* Getting 'mileage bucket' placement of vehicles by year*/
+--with t as (select
+--	case
+--		when sum(miles_driven_month)<36000 then '0-36k'
+--		when sum(miles_driven_month)between 35999 and 50001 then '36k-50k'
+--		when sum(miles_driven_month)>50000 then '50k+'
+--	end as buckets,
+--	vehicle_nbr,
+--	case 
+--		when ceil(vehicle_corrected_age*1.0/12.0)>10 then 10
+--		else ceil(vehicle_corrected_age*1.0/12.0)
+--	end as ageyr
+--from fms_fin_sandbox.sasetl.pm_optimization_table_3_170
+--where
+--	miles_driven_month >=0 and
+--	miles_driven_month is not null
+--group by 2,3
+--order by 1,3)
+--
+--select buckets,ageyr,count(distinct vehicle_nbr) from t
+--where ageyr>0
+--group by 1,2
+--order by 1,2;
+
+/* Number of SAM 170s out of commission by year*/
+with t as (
+	select 
+		vehicle_nbr,
+		active_flg,
+		case 
+			when ceil(vehicle_corrected_age*1.0/12.0)>10 then 10
+			else ceil(vehicle_corrected_age*1.0/12.0)
+		end as ageyr
+	from fms_fin_sandbox.sasetl.pm_optimization_table_3_170
+	where
+		active_flg = 0 and
+		ageyr > 0
+	group by 1,2,3
+	order by 2)
+
+select ageyr,count(vehicle_nbr)
+from t
+group by 1
+order by 1;
+
+/*----------------------------------------------------------------------------------------------------------------------*/
+
+/* RETRIEVING PM DATA*/
+
+/* Grabbing all information from v_running_cost_detail for all vehicles in pm_optimization_table_3*/
+select
+	vehicle_nbr,
+	yr_nbr,
+	yr_mnth_nbr,
+	gl_transaction_dt,
+	sum(coalesce(total_cost,0)) as total_cost,
+	fleet_key,
+	tsk_system_cd,
+	tsk_assembly_cd,
+	tsk_component_cd
+into fms_fin_sandbox.sasetl.cost_sam_170
+from bdl.admin.v_running_cost_detail
+where vehicle_nbr in (select distinct vehicle_nbr from fms_fin_sandbox.sasetl.pm_optimization_table_3_170)
+group by 
+	vehicle_nbr,
+	yr_nbr,
+	yr_mnth_nbr,
+	gl_transaction_dt,
+	fleet_key,
+	tsk_system_cd,
+	tsk_assembly_cd,
+	tsk_component_cd;
+
+select count(distinct vehicle_nbr) from fms_fin_sandbox.sasetl.pm_optimization_table_3_170; --13292
+select count(distinct vehicle_nbr) from cost_sam_170; --13292
+
+/*cleaning up the fact that there were some vehicles that were in pm _optimization_table_3_170 table that did not appear in cost_sam_170*/
+delete from fms_fin_sandbox.sasetl.pm_optimization_table_3_170 where vehicle_nbr not in (select distinct vehicle_nbr from fms_fin_sandbox.sasetl.cost_sam_170);
+
+select count(distinct vehicle_nbr) from pm_optimization_table_3_170 where odometer_rdr_corrected is null; -- 2319 vehicles that are missing odometer readings
+
+/* joining cost_sam_170 with pm_optimization table_3_170 to get the proper months and age and odometer readings */
+select
+	a.vehicle_nbr,
+	yr_nbr,
+	yr_mnth_nbr,
+	gl_transaction_dt,
+	total_cost,
+	a.fleet_key,
+	tsk_system_cd,
+	tsk_assembly_cd,
+	tsk_component_cd,
+	b.odometer_rdr_corrected,
+	b.vehicle_corrected_age
+into cost_sam_170_2
+from cost_sam_170 as a
+left join pm_optimization_table_3_170 as b on 
+	a.vehicle_nbr=b.vehicle_nbr and
+	a.yr_nbr=extract(year from b.month_end_dt) and
+	a.yr_mnth_nbr=extract(month from b.month_end_dt)
+where 
+	b.odometer_rdr_corrected is not null and /* was getting odometer_rdr_corrected values that were null in subsequent population*/
+	b.vehicle_corrected_age is not null      /* was getting vehicle_corrected_age values that were null in subsequent population*/
+group by
+	a.total_cost,
+	b.odometer_rdr_corrected,
+	a.vehicle_nbr,
+	b.vehicle_corrected_age,
+	yr_nbr,
+	yr_mnth_nbr,
+	gl_transaction_dt,
+	a.fleet_key,
+	tsk_system_cd,
+	tsk_assembly_cd,
+	tsk_component_cd
+order by gl_transaction_dt;
+
+drop table cost_sam_170_2;
+select count(distinct vehicle_nbr) from cost_sam_170_2; --11722
+
+/* joining with pm_tasks_from_mt_v02 to get pm data for population*/
+select
+	vehicle_nbr,
+	yr_nbr,
+	yr_mnth_nbr,
+	gl_transaction_dt,
+	odometer_rdr_corrected,
+	vehicle_corrected_age,
+	sum(total_cost)as total_cost,
+	case 
+		when pmtype notnull then coalesce(pmtype,'') 
+		else null 
+	end as PM_Type
+into pm_data_peyt_170_1
+from cost_sam_170_2 as a
+inner join fms_fin_sandbox.sasetl.pm_tasks_from_mt_v02 as b on 
+	 a.tsk_system_cd=b.SMATASYSCD and
+	 a.tsk_assembly_cd=b.smataasmcd and
+	 a.tsk_component_cd=b.SMATAPRTCD 
+where 
+	b.smactcode=10 and
+	coalesce(pmtype,'') in ('A PM','B PM','C PM')
+group by
+	vehicle_nbr,
+	yr_nbr,
+	yr_mnth_nbr,
+	gl_transaction_dt,
+	odometer_rdr_corrected,
+	vehicle_corrected_age,
+	PM_Type;
+
+drop table pm_data_peyt_170_1;
+select*from pm_data_peyt_170_1;
+select count(vehicle_nbr) from fms_fin_sandbox.sasetl.pm_data_peyt_170_1; -- 113348
+
+/* handle multiple pms on same day*/
+select
+	vehicle_nbr,
+	yr_nbr,
+	yr_mnth_nbr,
+	gl_transaction_dt,
+	odometer_rdr_corrected,
+	vehicle_corrected_age,
+	sum(total_cost) as total_cost,
+	max(PM_Type) as pm_type
+into pm_data_peyt_170_2
+from pm_data_peyt_170_1
+group by 
+	vehicle_nbr,
+	yr_nbr,
+	yr_mnth_nbr,
+	gl_transaction_dt,
+	odometer_rdr_corrected,
+	vehicle_corrected_age;
+
+drop table pm_data_peyt_170_2;
+select count(vehicle_nbr) from fms_fin_sandbox.sasetl.pm_data_peyt_170_2; -- 113091
+
+/*Adding an id row */
+select
+	row_number() 
+			over(partition by vehicle_nbr
+			order by vehicle_nbr,gl_transaction_dt) as ID,
+	vehicle_nbr,
+	yr_nbr, 
+	yr_mnth_nbr, 
+	gl_transaction_dt, 
+	odometer_rdr_corrected, 
+	vehicle_corrected_age, 
+	total_cost,
+	pm_type
+into fms_fin_sandbox.sasetl.pm_data_peyt_170_3
+from fms_fin_sandbox.sasetl.pm_data_peyt_170_2
+order by vehicle_nbr,gl_transaction_dt;
+
+drop table pm_data_peyt_170_3;
+select count(distinct vehicle_nbr) from pm_data_peyt_170_3; -- 9683
+
+/* Calculating Interval between PMs*/
+select
+	a.id as ID1,
+	b.id as ID2,
+	a.vehicle_nbr,
+	a.vehicle_corrected_age as age,
+	a.gl_transaction_dt as crnt_pm_dt,
+	b.gl_transaction_dt as nxt_pm_dt,
+	a.odometer_rdr_corrected as odom,
+	a.pm_type as crnt_pm_type,
+	b.pm_type as nxt_pm_type,
+	round(a.total_cost,2) as total_pm_cost,
+	case
+		when b.odometer_rdr_corrected is null then ((a.odometer_rdr_corrected/a.vehicle_corrected_age)/30)*180
+		else b.odometer_rdr_corrected-a.odometer_rdr_corrected 
+	end as Interval_Miles,
+	case 
+		when b.gl_transaction_dt is null then 180
+		else b.gl_transaction_dt-a.gl_transaction_dt
+	end as Interval_Days,
+	(a.odometer_rdr_corrected/a.vehicle_corrected_age)/30 as est_mi_day
+into pm_data_peyt_170_4_intervals
+from pm_data_peyt_170_3 as a
+left join pm_data_peyt_170_3 as b on
+	a.vehicle_nbr=b.vehicle_nbr and
+	b.ID=a.ID+1
+where 
+	interval_miles > 0 and
+	interval_days > 0
+order by 
+a.vehicle_nbr,
+a.gl_transaction_dt;
+
+drop table pm_data_peyt_170_4_intervals;
+select count(distinct vehicle_nbr) from pm_data_peyt_170_4_intervals ; -- 9683
+select*from pm_data_peyt_170_4_intervals where vehicle_nbr = 317669 order by crnt_pm_dt;
+select * from pm_data_peyt_170_4_intervals where crnt_pm_dt=nxt_pm_dt;-- checked... never two pms on same day...
+/*----------------------------------------------------------------------------------------------------------------------*/
+
+/* Grabbing Engine Make and Model*/
+select 
+	id1 as id,
+	a.vehicle_nbr,
+	crnt_pm_dt,
+	nxt_pm_dt,
+	age,
+	odom,
+	crnt_pm_type,
+	nxt_pm_type,
+	total_pm_cost,
+	interval_miles,
+	interval_days,
+	est_mi_day,
+	case 
+	when Substring(coalesce(Corrected_Ryder_engine_label,engine_model_desc) , 1,(strpos(coalesce(Corrected_Ryder_engine_label,engine_model_desc), '''')+2)) in ('ISX''10','ISX15''10') then 'ISX''10' 
+	when Substring(coalesce(Corrected_Ryder_engine_label,engine_model_desc) , 1,(strpos(coalesce(Corrected_Ryder_engine_label,engine_model_desc), '''')+2)) in ('DD15''13','DD15AT''13','DD15TC''13') then 'DD15''13' 
+	else Substring(coalesce(Corrected_Ryder_engine_label,engine_model_desc) , 1,(strpos(coalesce(Corrected_Ryder_engine_label,engine_model_desc), '''')+2)) 
+end as Engine_Label,
+engine_manufacturer_cd,
+	case
+		when crnt_pm_type = 'A PM' then 180
+		when crnt_pm_type = 'B PM' then 180
+		when crnt_pm_type = 'C PM' then 180
+		else null
+	end as max_days_till_nxt_PM
+into pm_data_peyt_170_eng_intervals
+from fms_ops_fin.admin.v_running_cost_detail  a
+left join cummins_enginelabel_correction b on 
+a.vehicle_nbr=b.veh_no
+right join pm_data_peyt_170_4_intervals as c on
+a.vehicle_nbr=c.vehicle_nbr
+group by 
+	id,
+	a.vehicle_nbr,
+	crnt_pm_dt,
+	nxt_pm_dt,
+	age,
+	odom,
+	crnt_pm_type,
+	nxt_pm_type,
+	total_pm_cost,
+	interval_miles,
+	interval_days,
+	est_mi_day,
+	max_days_till_nxt_PM,
+	Engine_Label,
+	engine_manufacturer_cd
+order by crnt_pm_dt, a.vehicle_nbr;
+
+drop table pm_data_peyt_170_eng_intervals;
+select*from pm_data_peyt_170_eng_intervals where vehicle_nbr = 317669 order by crnt_pm_dt; 
+select*from pm_data_peyt_170_eng_intervals where vehicle_nbr = 619199 order by crnt_pm_dt;
+select count(distinct vehicle_nbr)from pm_data_peyt_170_eng_intervals; --9683
+
+/* Calculating PM Bucket Actuals*/
+select
+	id,
+	vehicle_nbr,
+	crnt_pm_dt,
+	nxt_pm_dt,
+	age,
+	odom,
+	crnt_pm_type,
+	nxt_pm_type,
+	total_pm_cost,
+	interval_miles,
+	interval_days,
+	est_mi_day,
+	engine_label,
+	engine_manufacturer_cd,
+	max_days_till_nxt_pm,
+	case 
+		when engine_manufacturer_cd in ('DETR','CUMM','VOLV','MACK') and engine_label like 'DD13%' or engine_label like 'DD15%' or engine_label like 'DD16%' or engine_label like 'ISX%' or engine_label like 'D11%' or engine_label like 'D13%' or engine_label  like 'D16%' or engine_label like 'MP7%' or engine_label like 'MP8%' or engine_label like 'MP10%' then 
+			case
+				when (interval_miles/interval_days)*365 < 60000 then '0-60 special eng'
+				when (interval_miles/interval_days)*365 >= 60000 then '60+ special eng'
+			end
+		else 
+			case
+				when (interval_miles/interval_days)*365 < 60000 then '0-60'
+				when (interval_miles/interval_days)*365 between 60000 and 110000 then '60-120'
+				when (interval_miles/interval_days)*365 >= 120000 then '120+'
+			end
+	end as buckets,
+	case 
+		when buckets = '0-60 special eng' then '35000'
+		when buckets = '60+ special eng' and engine_manufacturer_cd = 'DETR' then 50000
+		when buckets = '60+ special eng' and engine_manufacturer_cd = 'CUMM' then 40000
+		when buckets = '60+ special eng' and engine_manufacturer_cd in ('VOLV','MACK') then 45000
+		when buckets = '0-60' then 24000
+		when buckets = '60-120' then 30000
+		when buckets = '120+' then 36000
+	end as mi_till_nxt_pm_aorb
+into pm_data_peyt_170_5_intervals
+from pm_data_peyt_170_eng_intervals;
+
+drop table pm_data_peyt_170_5_intervals;
+select*from pm_data_peyt_170_5_intervals where vehicle_nbr =317669 order by crnt_pm_dt; -- not special eng
+select*from pm_data_peyt_170_5_intervals where vehicle_nbr = 619199 order by crnt_pm_dt; -- special eng DETR
+select*from pm_data_peyt_170_5_intervals where vehicle_nbr = 494675 order by crnt_pm_dt; -- special eng MACK
+
+/* Calculate average miles per day, whether early/late/ontime, miles late or early, days late or early, and when pm should be*/
+select
+	a.id as id1,
+	b.id as id2,
+	a.vehicle_nbr,
+	a.engine_label,
+	a.engine_manufacturer_cd,
+	a.crnt_pm_dt,
+	a.nxt_pm_dt,
+	a.crnt_pm_type,
+	a.nxt_pm_type,
+	a.age,
+	a.odom,
+	a.total_pm_cost,
+	a.interval_miles,
+	a.interval_days,
+	a.est_mi_day,
+	round(a.interval_miles/(a.interval_days*1.0),1) as avg_mi_day,
+	a.buckets,
+	a.mi_till_nxt_pm_aorb, 
+	a.max_days_till_nxt_pm,
+	case 
+		when b.interval_miles>a.mi_till_nxt_pm_aorb and a.nxt_pm_type is null then 'ontime'
+		when b.interval_miles>a.mi_till_nxt_pm_aorb then 'late'
+		when b.interval_miles<a.mi_till_nxt_pm_aorb and a.nxt_pm_type is null then 'ontime'
+		when b.interval_miles<a.mi_till_nxt_pm_aorb then 'early'
+		when b.interval_miles=a.mi_till_nxt_pm_aorb and a.nxt_pm_type is null then 'ontime'
+		when b.interval_miles=a.mi_till_nxt_pm_aorb then 'ontime'
+	end as pm_punctuality_bsd_mi,
+	case
+		when a.nxt_pm_type is null then 0
+		else abs(a.interval_miles-a.mi_till_nxt_pm_aorb) 
+	end as mi_how_lt_or_erly_bsd_mi,
+	case
+		when a.nxt_pm_type is null then 0
+		when avg_mi_day = 0 then 0
+		else round((abs(mi_how_lt_or_erly_bsd_mi))/(avg_mi_day),0)
+	end as days_how_lt_or_erly_bsd_mi,
+	case 
+		when pm_punctuality_bsd_mi is null then null 
+		when pm_punctuality_bsd_mi = 'early' then a.crnt_pm_dt + days_how_lt_or_erly_bsd_mi
+		when pm_punctuality_bsd_mi = 'late' then a.crnt_pm_dt - days_how_lt_or_erly_bsd_mi
+		when pm_punctuality_bsd_mi = 'ontime' then a.crnt_pm_dt
+	end as whn_shld_pm_be_bsd_mi,
+	case 
+		when a.interval_days>b.max_days_till_nxt_pm and a.nxt_pm_type is null then 'ontime'
+		when a.interval_days>b.max_days_till_nxt_pm then 'late'
+		when a.interval_days<b.max_days_till_nxt_pm and a.nxt_pm_type is null then 'ontime'
+		when a.interval_days<b.max_days_till_nxt_pm then 'early'
+		when a.interval_days=b.max_days_till_nxt_pm and a.nxt_pm_type is null then 'ontime'
+		when a.interval_days=b.max_days_till_nxt_pm then 'ontime'
+	end as pm_punctuality_bsd_days,
+	abs(b.max_days_till_nxt_pm-a.interval_days) as days_how_lt_or_erly_bsd_days,
+	case
+		when pm_punctuality_bsd_mi = 'early' and pm_punctuality_bsd_days = 'early' then case
+																							when days_how_lt_or_erly_bsd_mi > days_how_lt_or_erly_bsd_days then 'use bsd days'
+																							when days_how_lt_or_erly_bsd_mi < days_how_lt_or_erly_bsd_days then 'use bsd mi'
+																						end
+		when pm_punctuality_bsd_mi = 'late' and pm_punctuality_bsd_days = 'early' then 'use bsd mi'
+		when pm_punctuality_bsd_mi = 'ontime' and pm_punctuality_bsd_days = 'early' then 'use bsd mi'
+		when pm_punctuality_bsd_mi = 'early' and pm_punctuality_bsd_days = 'late' then 'use bsd days'
+		when pm_punctuality_bsd_mi = 'late' and pm_punctuality_bsd_days = 'late' then case
+																						  when days_how_lt_or_erly_bsd_mi > days_how_lt_or_erly_bsd_days then 'use bsd mi'
+																						  when days_how_lt_or_erly_bsd_mi < days_how_lt_or_erly_bsd_days then 'use bsd days'
+																					  end
+		when pm_punctuality_bsd_mi = 'ontime' and pm_punctuality_bsd_days = 'late' then 'use bsd miles'
+		when pm_punctuality_bsd_mi = 'early' and pm_punctuality_bsd_days = 'ontime' then 'use bsd days'
+		when pm_punctuality_bsd_mi = 'late' and pm_punctuality_bsd_days = 'ontime' then 'use bsd days'
+		when pm_punctuality_bsd_mi = 'ontime' and pm_punctuality_bsd_days = 'ontime' then case 
+																							  when round(random()) = 0 then 'use bsd mi'
+																							  when round(random()) = 1 then 'use bsd mi'
+																						  end
+	end as use_bsd_mi_or_days
+into pm_data_peyt_170_6_intervals
+from pm_data_peyt_170_5_intervals as a
+left join pm_data_peyt_170_5_intervals as b on
+	a.vehicle_nbr=b.vehicle_nbr and
+	b.id=a.id-1
+order by 
+a.vehicle_nbr,
+a.crnt_pm_dt;
+
+drop table pm_data_peyt_170_6_intervals;
+select*from pm_data_peyt_170_6_intervals where vehicle_nbr = 317669 order by crnt_pm_dt; -- no special eng
+select*from pm_data_peyt_170_6_intervals where vehicle_nbr = 619199 order by crnt_pm_dt; -- special eng DETR
+select*from pm_data_peyt_170_6_intervals where vehicle_nbr = 494675 order by crnt_pm_dt; -- special eng MACK
+/*----------------------------------------------------------------------------------------------------------------------*/
+
+/* Grabbing Uptime Data between PMs*/
+select	
+	a.vehicle_nbr,
+	a.engine_label,
+	a.engine_manufacturer_cd,
+	a.crnt_pm_dt,
+	a.nxt_pm_dt,
+	a.crnt_pm_type,
+	a.nxt_pm_type,
+	a.age,
+	a.odom,
+	a.total_pm_cost,
+	a.interval_miles,
+	a.interval_days,
+	a.est_mi_day,
+	a.avg_mi_day,
+	a.buckets,
+	a.mi_till_nxt_pm_aorb,
+	a.max_days_till_nxt_pm,
+	a.pm_punctuality_bsd_mi,
+	a.mi_how_lt_or_erly_bsd_mi,
+	a.days_how_lt_or_erly_bsd_mi,
+	a.whn_shld_pm_be_bsd_mi,
+	a.pm_punctuality_bsd_days,
+	a.days_how_lt_or_erly_bsd_days,
+	a.use_bsd_mi_or_days,
+	sum(b.downtime_in_days) as dwntm_days
+into pm_data_peyt_170_7_uptime
+from pm_data_peyt_170_6_intervals as a
+left join 
+	( /* b table that has downtime minutes*/
+	select 
+		b1.vehicle_nbr,
+		calendar.dt,
+		round(avg(coalesce(b2.downtime_in_mins,0))/1440,2) as downtime_in_days
+	from bdl.admin.shop_rpr_appt_detail_fact as b2
+	join bdl.admin.v_calendar_dt_transformation as b3 on 
+		(b2.etl_dt_key = b3.dt_key)
+	left join bdl.admin.calendar_dt as calendar on 
+		(b2.etl_dt_key=calendar.dt_key) 
+	join bdl.admin.fleet_dim as b1 on 
+		(b2.fleet_detail_key = b1.fleet_detail_key)
+	join bdl.admin.shop_rpr_appt_dim as b4 on 
+		(b2.shop_rpr_appt_dim_detail_key = b4.shop_rpr_appt_dim_detail_key)
+	where 
+		b1.vehicle_nbr in(select distinct vehicle_nbr from pm_data_peyt_170_6_intervals) and
+		b4.soft_delete = 0 and
+		b1.acct_status_cd = 4 and
+		b1.soft_delete = 0 and
+		(b2.etl_dt_key = b2.shop_completion_dt_key OR b2.shop_completion_dt_key = 0) and
+		b4.shop_promise_dt is not null and
+		dt >= '2016-02-26 00:00:00'
+	group by
+		b1.vehicle_nbr,calendar.dt
+	order by dt) as b 
+on
+   	a.vehicle_nbr=b.vehicle_nbr and
+	dt >  crnt_pm_dt+interval '7 days' and dt < nxt_pm_dt
+group by
+	a.vehicle_nbr,
+	a.engine_label,
+	a.engine_manufacturer_cd,
+	a.crnt_pm_dt,
+	a.nxt_pm_dt,
+	a.crnt_pm_type,
+	a.nxt_pm_type,
+	a.age,
+	a.odom,
+	a.total_pm_cost,
+	a.interval_miles,
+	a.interval_days,
+	a.est_mi_day,
+	a.avg_mi_day,
+	a.buckets,
+	a.mi_till_nxt_pm_aorb,
+	a.max_days_till_nxt_pm,
+	a.pm_punctuality_bsd_mi,
+	a.mi_how_lt_or_erly_bsd_mi,
+	a.days_how_lt_or_erly_bsd_mi,
+	a.whn_shld_pm_be_bsd_mi,
+	a.pm_punctuality_bsd_days,
+	a.days_how_lt_or_erly_bsd_days,
+	a.use_bsd_mi_or_days
+order by
+	crnt_pm_dt;
+	
+drop table pm_data_peyt_170_7_uptime;
+select*from pm_data_peyt_170_7_uptime where vehicle_nbr = 317669 order by crnt_pm_dt; -- no special eng
+select*from pm_data_peyt_170_7_uptime where vehicle_nbr = 619199 order by crnt_pm_dt; -- special eng DETR
+select*from pm_data_peyt_170_7_uptime where vehicle_nbr = 494675 order by crnt_pm_dt; -- special eng MACK
+
+/* Grabbing Breakdown and Total Running Cost Data between PMs*/
+select 
+	a.vehicle_nbr,
+	a.engine_label,
+	a.engine_manufacturer_cd,
+	a.crnt_pm_dt,
+	a.nxt_pm_dt,
+	a.crnt_pm_type,
+	a.nxt_pm_type,
+	a.age,
+	a.odom,
+	a.total_pm_cost,
+	a.interval_miles,
+	a.interval_days,
+	a.est_mi_day,
+	a.avg_mi_day,
+	a.buckets,
+	a.mi_till_nxt_pm_aorb,
+	a.max_days_till_nxt_pm,
+	a.pm_punctuality_bsd_mi,
+	a.mi_how_lt_or_erly_bsd_mi,
+	a.days_how_lt_or_erly_bsd_mi,
+	a.whn_shld_pm_be_bsd_mi,
+	a.pm_punctuality_bsd_days,
+	a.days_how_lt_or_erly_bsd_days,
+	a.use_bsd_mi_or_days,
+	a.dwntm_days,
+	sum(c.nbr_brkdwns) as nbr_brkdwns,
+	round(sum(c.total_cost),2) as total_cost,
+	round(sum(real_dollars_total_cost),2) as real_dollars_total_cost
+into pm_data_peyt_170_8_uptime
+from pm_data_peyt_170_7_uptime as a
+/* make rk 170 version (ask Rashid how he did it)*/
+left join
+	( /* c table that has number of breakdowns and total running cost*/
+	select
+		c1.vehicle_nbr,
+		c1.gl_transaction_dt,
+		count(distinct case when breakdown_flg=1 then c1.application_reference_cd else '0' end) - 1 as nbr_brkdwns,
+		sum(c1.total_cost) as total_cost,
+		c2.index,
+		c2.month as cpi_dt,
+		c2.cpi,
+		sum(c1.total_cost*c2.cpi) as real_dollars_total_cost
+	from bdl.admin.v_running_cost_detail as c1 
+		left join bdl.admin.v_location_hierarchy_fmsna_cur as l on c1.charge_location_cd=l.location_cd
+		left join (select 
+						index,
+						month,
+						cpi
+					from cpi) as c2 on extract(year from gl_transaction_dt)=extract(year from c2.month) and extract(month from gl_transaction_dt)=extract(month from c2.month)		
+			where 
+				c1.vehicle_nbr in (select distinct vehicle_nbr from fms_fin_sandbox.sasetl.pm_data_peyt_170_6_intervals) and 
+				l.area_cd in ('59FMS') and 
+				l.cbu_cd<>'O3300' and 
+				l.location_cd<>09041 and 
+				trans_type_running_cost_flg=1 and 
+				l.region_cd in ('3450O','3472O','3476O','3488O') and
+				substr(gl_account_cd,1,1) in ('5') and 
+				c1.product_line_cd in ('OFFL','FSL')
+            group by
+				c1.gl_transaction_dt,
+				c1.vehicle_nbr,
+				c2.index,
+				c2.month,
+				c2.cpi)as c
+on 
+	a.vehicle_nbr=c.vehicle_nbr and
+	gl_transaction_dt > crnt_pm_dt+interval '7 days' and gl_transaction_dt < nxt_pm_dt
+group by
+	a.vehicle_nbr,
+	a.engine_label,
+	a.engine_manufacturer_cd,
+	a.crnt_pm_dt,
+	a.nxt_pm_dt,
+	a.crnt_pm_type,
+	a.nxt_pm_type,
+	a.age,
+	a.odom,
+	a.total_pm_cost,
+	a.interval_miles,
+	a.interval_days,
+	a.est_mi_day,
+	a.avg_mi_day,
+	a.buckets,
+	a.mi_till_nxt_pm_aorb,
+	a.max_days_till_nxt_pm,
+	a.pm_punctuality_bsd_mi,
+	a.mi_how_lt_or_erly_bsd_mi,
+	a.days_how_lt_or_erly_bsd_mi,
+	a.whn_shld_pm_be_bsd_mi,
+	a.pm_punctuality_bsd_days,
+	a.days_how_lt_or_erly_bsd_days,
+	a.use_bsd_mi_or_days,
+	a.dwntm_days,
+	c.nbr_brkdwns
+order by
+	crnt_pm_dt;
+
+drop table pm_data_peyt_170_8_uptime;
+select*from pm_data_peyt_170_8_uptime where vehicle_nbr = 317669 order by crnt_pm_dt; -- no special eng
+select*from pm_data_peyt_170_8_uptime where vehicle_nbr = 619199 order by crnt_pm_dt; -- special eng DETR
+select*from pm_data_peyt_170_8_uptime where vehicle_nbr = 494675 order by crnt_pm_dt; -- special eng MACK
+
+/*--------------------------------------------------------*/
+
+/* Distribution of Punctuality (days) Based on Mi Projection*/
+select
+	case
+		when days_how_lt_or_erly_bsd_mi >= 90 and pm_punctuality_bsd_mi = 'early' then '-90+'
+		when days_how_lt_or_erly_bsd_mi between 80 and 89 and pm_punctuality_bsd_mi = 'early' then '-80 thru -89'
+		when days_how_lt_or_erly_bsd_mi between 70 and 79 and pm_punctuality_bsd_mi = 'early' then '-70 thru -79'
+		when days_how_lt_or_erly_bsd_mi between 60 and 69 and pm_punctuality_bsd_mi = 'early' then '-60 thru -69'
+		when days_how_lt_or_erly_bsd_mi between 50 and 59 and pm_punctuality_bsd_mi = 'early' then '-50 thru -59'
+		when days_how_lt_or_erly_bsd_mi between 40 and 49 and pm_punctuality_bsd_mi = 'early' then '-40 thru -49'
+		when days_how_lt_or_erly_bsd_mi between 30 and 39 and pm_punctuality_bsd_mi = 'early' then '-30 thru -39'
+		when days_how_lt_or_erly_bsd_mi between 20 and 29 and pm_punctuality_bsd_mi = 'early' then '-20 thru -29'
+		when days_how_lt_or_erly_bsd_mi between 10 and 19 and pm_punctuality_bsd_mi = 'early' then '-10 thru -19'
+		when days_how_lt_or_erly_bsd_mi between 1 and 9 and pm_punctuality_bsd_mi = 'early' then '-1 thru -9'
+		when days_how_lt_or_erly_bsd_mi = 0 and pm_punctuality_bsd_mi = 'ontime' then '0'
+		when days_how_lt_or_erly_bsd_mi between 1 and 9 and pm_punctuality_bsd_mi = 'late' then '1 thru 9'
+		when days_how_lt_or_erly_bsd_mi between 10 and 19 and pm_punctuality_bsd_mi = 'late' then '10 thru 19'
+		when days_how_lt_or_erly_bsd_mi between 20 and 29 and pm_punctuality_bsd_mi = 'late' then '20 thru 29'
+		when days_how_lt_or_erly_bsd_mi between 30 and 39 and pm_punctuality_bsd_mi = 'late' then '30 thru 39'
+		when days_how_lt_or_erly_bsd_mi between 40 and 49 and pm_punctuality_bsd_mi = 'late' then '40 thru 49'
+		when days_how_lt_or_erly_bsd_mi between 50 and 59 and pm_punctuality_bsd_mi = 'late' then '50 thru 59'
+		when days_how_lt_or_erly_bsd_mi between 60 and 69 and pm_punctuality_bsd_mi = 'late' then '60 thru 69'
+		when days_how_lt_or_erly_bsd_mi between 70 and 79 and pm_punctuality_bsd_mi = 'late' then '70 thru 79'
+		when days_how_lt_or_erly_bsd_mi between 80 and 89 and pm_punctuality_bsd_mi = 'late' then '80 thru 89'
+		when days_how_lt_or_erly_bsd_mi >= 90 and pm_punctuality_bsd_mi = 'late' then '90+'
+	end as days_how_lt_or_erly_clstrs,
+	case
+		when days_how_lt_or_erly_bsd_mi >= 90 and pm_punctuality_bsd_mi = 'early' then 1
+		when days_how_lt_or_erly_bsd_mi between 80 and 89 and pm_punctuality_bsd_mi = 'early' then 2
+		when days_how_lt_or_erly_bsd_mi between 70 and 79 and pm_punctuality_bsd_mi = 'early' then 3
+		when days_how_lt_or_erly_bsd_mi between 60 and 69 and pm_punctuality_bsd_mi = 'early' then 4
+		when days_how_lt_or_erly_bsd_mi between 50 and 59 and pm_punctuality_bsd_mi = 'early' then 5
+		when days_how_lt_or_erly_bsd_mi between 40 and 49 and pm_punctuality_bsd_mi = 'early' then 6
+		when days_how_lt_or_erly_bsd_mi between 30 and 39 and pm_punctuality_bsd_mi = 'early' then 7
+		when days_how_lt_or_erly_bsd_mi between 20 and 29 and pm_punctuality_bsd_mi = 'early' then 8
+		when days_how_lt_or_erly_bsd_mi between 10 and 19 and pm_punctuality_bsd_mi = 'early' then 9
+		when days_how_lt_or_erly_bsd_mi between 1 and 9 and pm_punctuality_bsd_mi = 'early' then 10
+		when days_how_lt_or_erly_bsd_mi = 0 and pm_punctuality_bsd_mi = 'ontime' then 11
+		when days_how_lt_or_erly_bsd_mi between 1 and 9 and pm_punctuality_bsd_mi = 'late' then 12
+		when days_how_lt_or_erly_bsd_mi between 10 and 19 and pm_punctuality_bsd_mi = 'late' then 13
+		when days_how_lt_or_erly_bsd_mi between 20 and 29 and pm_punctuality_bsd_mi = 'late' then 14
+		when days_how_lt_or_erly_bsd_mi between 30 and 39 and pm_punctuality_bsd_mi = 'late' then 15
+		when days_how_lt_or_erly_bsd_mi between 40 and 49 and pm_punctuality_bsd_mi = 'late' then 16
+		when days_how_lt_or_erly_bsd_mi between 50 and 59 and pm_punctuality_bsd_mi = 'late' then 17
+		when days_how_lt_or_erly_bsd_mi between 60 and 69 and pm_punctuality_bsd_mi = 'late' then 18
+		when days_how_lt_or_erly_bsd_mi between 70 and 79 and pm_punctuality_bsd_mi = 'late' then 19
+		when days_how_lt_or_erly_bsd_mi between 80 and 89 and pm_punctuality_bsd_mi = 'late' then 20
+		when days_how_lt_or_erly_bsd_mi >= 90 and pm_punctuality_bsd_mi = 'late' then 21
+	end as clstr_id,
+	sum(interval_days) as total_interval_days,
+	sum(real_dollars_total_cost) as real_dollars_total_cost,
+	count(distinct vehicle_nbr) as vehicle_count,
+	count(vehicle_nbr) as pm_count,
+	round(avg(real_dollars_total_cost),2) as real_dollars_total_cost_p_veh,
+	avg(dwntm_days) as dwntm_days_p_veh,
+	avg(nbr_brkdwns) as nbr_brkdwns_p_veh
+into dstrbtion_punctuality_170_bsd_mi
+from pm_data_peyt_170_8_uptime
+group by
+	days_how_lt_or_erly_clstrs,
+	clstr_id
+order by
+	clstr_id,
+	days_how_lt_or_erly_clstrs;
+	
+drop table dstrbtion_punctuality_170_bsd_mi;
+select*from dstrbtion_punctuality_170_bsd_mi order by clstr_id;
+
+/* Normalized Distribution of Punctuality (days) Based on Mi Projection*/
+select
+	case
+		when days_how_lt_or_erly_bsd_mi >= 90 and pm_punctuality_bsd_mi = 'early' then '-90+'
+		when days_how_lt_or_erly_bsd_mi between 80 and 89 and pm_punctuality_bsd_mi = 'early' then '-80 thru -89'
+		when days_how_lt_or_erly_bsd_mi between 70 and 79 and pm_punctuality_bsd_mi = 'early' then '-70 thru -79'
+		when days_how_lt_or_erly_bsd_mi between 60 and 69 and pm_punctuality_bsd_mi = 'early' then '-60 thru -69'
+		when days_how_lt_or_erly_bsd_mi between 50 and 59 and pm_punctuality_bsd_mi = 'early' then '-50 thru -59'
+		when days_how_lt_or_erly_bsd_mi between 40 and 49 and pm_punctuality_bsd_mi = 'early' then '-40 thru -49'
+		when days_how_lt_or_erly_bsd_mi between 30 and 39 and pm_punctuality_bsd_mi = 'early' then '-30 thru -39'
+		when days_how_lt_or_erly_bsd_mi between 20 and 29 and pm_punctuality_bsd_mi = 'early' then '-20 thru -29'
+		when days_how_lt_or_erly_bsd_mi between 10 and 19 and pm_punctuality_bsd_mi = 'early' then '-10 thru -19'
+		when days_how_lt_or_erly_bsd_mi between 1 and 9 and pm_punctuality_bsd_mi = 'early' then '-1 thru -9'
+		when days_how_lt_or_erly_bsd_mi = 0 and pm_punctuality_bsd_mi = 'ontime' then '0'
+		when days_how_lt_or_erly_bsd_mi between 1 and 9 and pm_punctuality_bsd_mi = 'late' then '1 thru 9'
+		when days_how_lt_or_erly_bsd_mi between 10 and 19 and pm_punctuality_bsd_mi = 'late' then '10 thru 19'
+		when days_how_lt_or_erly_bsd_mi between 20 and 29 and pm_punctuality_bsd_mi = 'late' then '20 thru 29'
+		when days_how_lt_or_erly_bsd_mi between 30 and 39 and pm_punctuality_bsd_mi = 'late' then '30 thru 39'
+		when days_how_lt_or_erly_bsd_mi between 40 and 49 and pm_punctuality_bsd_mi = 'late' then '40 thru 49'
+		when days_how_lt_or_erly_bsd_mi between 50 and 59 and pm_punctuality_bsd_mi = 'late' then '50 thru 59'
+		when days_how_lt_or_erly_bsd_mi between 60 and 69 and pm_punctuality_bsd_mi = 'late' then '60 thru 69'
+		when days_how_lt_or_erly_bsd_mi between 70 and 79 and pm_punctuality_bsd_mi = 'late' then '70 thru 79'
+		when days_how_lt_or_erly_bsd_mi between 80 and 89 and pm_punctuality_bsd_mi = 'late' then '80 thru 89'
+		when days_how_lt_or_erly_bsd_mi >= 90 and pm_punctuality_bsd_mi = 'late' then '90+'
+	end as days_how_lt_or_erly_clstrs,
+	case
+		when days_how_lt_or_erly_bsd_mi >= 90 and pm_punctuality_bsd_mi = 'early' then 1
+		when days_how_lt_or_erly_bsd_mi between 80 and 89 and pm_punctuality_bsd_mi = 'early' then 2
+		when days_how_lt_or_erly_bsd_mi between 70 and 79 and pm_punctuality_bsd_mi = 'early' then 3
+		when days_how_lt_or_erly_bsd_mi between 60 and 69 and pm_punctuality_bsd_mi = 'early' then 4
+		when days_how_lt_or_erly_bsd_mi between 50 and 59 and pm_punctuality_bsd_mi = 'early' then 5
+		when days_how_lt_or_erly_bsd_mi between 40 and 49 and pm_punctuality_bsd_mi = 'early' then 6
+		when days_how_lt_or_erly_bsd_mi between 30 and 39 and pm_punctuality_bsd_mi = 'early' then 7
+		when days_how_lt_or_erly_bsd_mi between 20 and 29 and pm_punctuality_bsd_mi = 'early' then 8
+		when days_how_lt_or_erly_bsd_mi between 10 and 19 and pm_punctuality_bsd_mi = 'early' then 9
+		when days_how_lt_or_erly_bsd_mi between 1 and 9 and pm_punctuality_bsd_mi = 'early' then 10
+		when days_how_lt_or_erly_bsd_mi = 0 and pm_punctuality_bsd_mi = 'ontime' then 11
+		when days_how_lt_or_erly_bsd_mi between 1 and 9 and pm_punctuality_bsd_mi = 'late' then 12
+		when days_how_lt_or_erly_bsd_mi between 10 and 19 and pm_punctuality_bsd_mi = 'late' then 13
+		when days_how_lt_or_erly_bsd_mi between 20 and 29 and pm_punctuality_bsd_mi = 'late' then 14
+		when days_how_lt_or_erly_bsd_mi between 30 and 39 and pm_punctuality_bsd_mi = 'late' then 15
+		when days_how_lt_or_erly_bsd_mi between 40 and 49 and pm_punctuality_bsd_mi = 'late' then 16
+		when days_how_lt_or_erly_bsd_mi between 50 and 59 and pm_punctuality_bsd_mi = 'late' then 17
+		when days_how_lt_or_erly_bsd_mi between 60 and 69 and pm_punctuality_bsd_mi = 'late' then 18
+		when days_how_lt_or_erly_bsd_mi between 70 and 79 and pm_punctuality_bsd_mi = 'late' then 19
+		when days_how_lt_or_erly_bsd_mi between 80 and 89 and pm_punctuality_bsd_mi = 'late' then 20
+		when days_how_lt_or_erly_bsd_mi >= 90 and pm_punctuality_bsd_mi = 'late' then 21
+	end as clstr_id,
+	sum(interval_days) as total_interval_days,
+	sum(real_dollars_total_cost) as real_dollars_total_cost,
+	count(distinct vehicle_nbr) as vehicle_count,
+	count(vehicle_nbr) as pm_count,
+	round(sum(real_dollars_total_cost)/total_interval_days,2) as real_dollars_total_cost_p_veh_p_d,
+	sum(dwntm_days)/total_interval_days as dwntm_days_p_veh_p_d,
+	sum(nbr_brkdwns)/total_interval_days as nbr_brkdwns_p_veh_p_d
+into norm_dstrbtion_punctuality_170_bsd_mi
+from pm_data_peyt_170_8_uptime
+group by
+	days_how_lt_or_erly_clstrs,
+	clstr_id
+order by
+	clstr_id,
+	days_how_lt_or_erly_clstrs;
+	
+drop table norm_dstrbtion_punctuality_170_bsd_mi;
+select*from norm_dstrbtion_punctuality_170_bsd_mi order by clstr_id;
+
+/* Distribution of Punctuality (days) Based on Actual Days*/
+select
+	case
+		when days_how_lt_or_erly_bsd_days >= 90 and pm_punctuality_bsd_days = 'early' then '-90+'
+		when days_how_lt_or_erly_bsd_days between 80 and 89 and pm_punctuality_bsd_days = 'early' then '-80 thru -89'
+		when days_how_lt_or_erly_bsd_days between 70 and 79 and pm_punctuality_bsd_days = 'early' then '-70 thru -79'
+		when days_how_lt_or_erly_bsd_days between 60 and 69 and pm_punctuality_bsd_days = 'early' then '-60 thru -69'
+		when days_how_lt_or_erly_bsd_days between 50 and 59 and pm_punctuality_bsd_days = 'early' then '-50 thru -59'
+		when days_how_lt_or_erly_bsd_days between 40 and 49 and pm_punctuality_bsd_days = 'early' then '-40 thru -49'
+		when days_how_lt_or_erly_bsd_days between 30 and 39 and pm_punctuality_bsd_days = 'early' then '-30 thru -39'
+		when days_how_lt_or_erly_bsd_days between 20 and 29 and pm_punctuality_bsd_days = 'early' then '-20 thru -29'
+		when days_how_lt_or_erly_bsd_days between 10 and 19 and pm_punctuality_bsd_days = 'early' then '-10 thru -19'
+		when days_how_lt_or_erly_bsd_days between 1 and 9 and pm_punctuality_bsd_days = 'early' then '-1 thru -9'
+		when days_how_lt_or_erly_bsd_days = 0 and pm_punctuality_bsd_days = 'ontime' then '0'
+		when days_how_lt_or_erly_bsd_days between 1 and 9 and pm_punctuality_bsd_days = 'late' then '1 thru 9'
+		when days_how_lt_or_erly_bsd_days between 10 and 19 and pm_punctuality_bsd_days = 'late' then '10 thru 19'
+		when days_how_lt_or_erly_bsd_days between 20 and 29 and pm_punctuality_bsd_days = 'late' then '20 thru 29'
+		when days_how_lt_or_erly_bsd_days between 30 and 39 and pm_punctuality_bsd_days = 'late' then '30 thru 39'
+		when days_how_lt_or_erly_bsd_days between 40 and 49 and pm_punctuality_bsd_days = 'late' then '40 thru 49'
+		when days_how_lt_or_erly_bsd_days between 50 and 59 and pm_punctuality_bsd_days = 'late' then '50 thru 59'
+		when days_how_lt_or_erly_bsd_days between 60 and 69 and pm_punctuality_bsd_days = 'late' then '60 thru 69'
+		when days_how_lt_or_erly_bsd_days between 70 and 79 and pm_punctuality_bsd_days = 'late' then '70 thru 79'
+		when days_how_lt_or_erly_bsd_days between 80 and 89 and pm_punctuality_bsd_days = 'late' then '80 thru 89'
+		when days_how_lt_or_erly_bsd_days >= 90 and pm_punctuality_bsd_mi = 'late' then '90+'
+	end as days_how_lt_or_erly_clstrs,
+	case
+		when days_how_lt_or_erly_bsd_days >= 90 and pm_punctuality_bsd_days = 'early' then 1
+		when days_how_lt_or_erly_bsd_days between 80 and 89 and pm_punctuality_bsd_days = 'early' then 2
+		when days_how_lt_or_erly_bsd_days between 70 and 79 and pm_punctuality_bsd_days = 'early' then 3
+		when days_how_lt_or_erly_bsd_days between 60 and 69 and pm_punctuality_bsd_days = 'early' then 4
+		when days_how_lt_or_erly_bsd_days between 50 and 59 and pm_punctuality_bsd_days = 'early' then 5
+		when days_how_lt_or_erly_bsd_days between 40 and 49 and pm_punctuality_bsd_days = 'early' then 6
+		when days_how_lt_or_erly_bsd_days between 30 and 39 and pm_punctuality_bsd_days = 'early' then 7
+		when days_how_lt_or_erly_bsd_days between 20 and 29 and pm_punctuality_bsd_days = 'early' then 8
+		when days_how_lt_or_erly_bsd_days between 10 and 19 and pm_punctuality_bsd_days = 'early' then 9
+		when days_how_lt_or_erly_bsd_days between 1 and 9 and pm_punctuality_bsd_days = 'early' then 10
+		when days_how_lt_or_erly_bsd_days = 0 and pm_punctuality_bsd_days = 'ontime' then 11
+		when days_how_lt_or_erly_bsd_days between 1 and 9 and pm_punctuality_bsd_days = 'late' then 12
+		when days_how_lt_or_erly_bsd_days between 10 and 19 and pm_punctuality_bsd_days = 'late' then 13
+		when days_how_lt_or_erly_bsd_days between 20 and 29 and pm_punctuality_bsd_days = 'late' then 14
+		when days_how_lt_or_erly_bsd_days between 30 and 39 and pm_punctuality_bsd_days = 'late' then 15
+		when days_how_lt_or_erly_bsd_days between 40 and 49 and pm_punctuality_bsd_days = 'late' then 16
+		when days_how_lt_or_erly_bsd_days between 50 and 59 and pm_punctuality_bsd_days = 'late' then 17
+		when days_how_lt_or_erly_bsd_days between 60 and 69 and pm_punctuality_bsd_days = 'late' then 18
+		when days_how_lt_or_erly_bsd_days between 70 and 79 and pm_punctuality_bsd_days = 'late' then 19
+		when days_how_lt_or_erly_bsd_days between 80 and 89 and pm_punctuality_bsd_days = 'late' then 20
+		when days_how_lt_or_erly_bsd_days >= 90 and pm_punctuality_bsd_days = 'late' then 21
+	end as clstr_id,
+	sum(interval_days) as total_interval_days,
+	sum(real_dollars_total_cost) as real_dollars_total_cost,
+	count(distinct vehicle_nbr) as vehicle_count,
+	count(vehicle_nbr) as pm_count,
+	round(avg(real_dollars_total_cost),2) as real_dollars_total_cost_p_veh_p_d,
+	avg(dwntm_days) as dwntm_days_p_veh_p_d,
+	avg(nbr_brkdwns) as nbr_brkdwns_p_veh_p_d
+into dstrbtion_punctuality_170_bsd_days
+from pm_data_peyt_170_8_uptime
+group by
+	days_how_lt_or_erly_clstrs,
+	clstr_id
+order by
+	clstr_id,
+	days_how_lt_or_erly_clstrs;
+
+drop table dstrbtion_punctuality_170_bsd_days;
+select*from dstrbtion_punctuality_170_bsd_days order by clstr_id;
+
+/* Normalized Distribution of Punctuality (days) Based on Actual Days*/
+select
+	case
+		when days_how_lt_or_erly_bsd_days >= 90 and pm_punctuality_bsd_days = 'early' then '-90+'
+		when days_how_lt_or_erly_bsd_days between 80 and 89 and pm_punctuality_bsd_days = 'early' then '-80 thru -89'
+		when days_how_lt_or_erly_bsd_days between 70 and 79 and pm_punctuality_bsd_days = 'early' then '-70 thru -79'
+		when days_how_lt_or_erly_bsd_days between 60 and 69 and pm_punctuality_bsd_days = 'early' then '-60 thru -69'
+		when days_how_lt_or_erly_bsd_days between 50 and 59 and pm_punctuality_bsd_days = 'early' then '-50 thru -59'
+		when days_how_lt_or_erly_bsd_days between 40 and 49 and pm_punctuality_bsd_days = 'early' then '-40 thru -49'
+		when days_how_lt_or_erly_bsd_days between 30 and 39 and pm_punctuality_bsd_days = 'early' then '-30 thru -39'
+		when days_how_lt_or_erly_bsd_days between 20 and 29 and pm_punctuality_bsd_days = 'early' then '-20 thru -29'
+		when days_how_lt_or_erly_bsd_days between 10 and 19 and pm_punctuality_bsd_days = 'early' then '-10 thru -19'
+		when days_how_lt_or_erly_bsd_days between 1 and 9 and pm_punctuality_bsd_days = 'early' then '-1 thru -9'
+		when days_how_lt_or_erly_bsd_days = 0 and pm_punctuality_bsd_days = 'ontime' and nxt_pm_dt is not null then '0'
+		when days_how_lt_or_erly_bsd_days between 1 and 9 and pm_punctuality_bsd_days = 'late' then '1 thru 9'
+		when days_how_lt_or_erly_bsd_days between 10 and 19 and pm_punctuality_bsd_days = 'late' then '10 thru 19'
+		when days_how_lt_or_erly_bsd_days between 20 and 29 and pm_punctuality_bsd_days = 'late' then '20 thru 29'
+		when days_how_lt_or_erly_bsd_days between 30 and 39 and pm_punctuality_bsd_days = 'late' then '30 thru 39'
+		when days_how_lt_or_erly_bsd_days between 40 and 49 and pm_punctuality_bsd_days = 'late' then '40 thru 49'
+		when days_how_lt_or_erly_bsd_days between 50 and 59 and pm_punctuality_bsd_days = 'late' then '50 thru 59'
+		when days_how_lt_or_erly_bsd_days between 60 and 69 and pm_punctuality_bsd_days = 'late' then '60 thru 69'
+		when days_how_lt_or_erly_bsd_days between 70 and 79 and pm_punctuality_bsd_days = 'late' then '70 thru 79'
+		when days_how_lt_or_erly_bsd_days between 80 and 89 and pm_punctuality_bsd_days = 'late' then '80 thru 89'
+		when days_how_lt_or_erly_bsd_days >= 90 and pm_punctuality_bsd_mi = 'late' then '90+'
+	end as days_how_lt_or_erly_clstrs,
+	case
+		when days_how_lt_or_erly_bsd_days >= 90 and pm_punctuality_bsd_days = 'early' then 1
+		when days_how_lt_or_erly_bsd_days between 80 and 89 and pm_punctuality_bsd_days = 'early' then 2
+		when days_how_lt_or_erly_bsd_days between 70 and 79 and pm_punctuality_bsd_days = 'early' then 3
+		when days_how_lt_or_erly_bsd_days between 60 and 69 and pm_punctuality_bsd_days = 'early' then 4
+		when days_how_lt_or_erly_bsd_days between 50 and 59 and pm_punctuality_bsd_days = 'early' then 5
+		when days_how_lt_or_erly_bsd_days between 40 and 49 and pm_punctuality_bsd_days = 'early' then 6
+		when days_how_lt_or_erly_bsd_days between 30 and 39 and pm_punctuality_bsd_days = 'early' then 7
+		when days_how_lt_or_erly_bsd_days between 20 and 29 and pm_punctuality_bsd_days = 'early' then 8
+		when days_how_lt_or_erly_bsd_days between 10 and 19 and pm_punctuality_bsd_days = 'early' then 9
+		when days_how_lt_or_erly_bsd_days between 1 and 9 and pm_punctuality_bsd_days = 'early' then 10
+		when days_how_lt_or_erly_bsd_days = 0 and pm_punctuality_bsd_days = 'ontime' and nxt_pm_dt is not null then 11
+		when days_how_lt_or_erly_bsd_days between 1 and 9 and pm_punctuality_bsd_days = 'late' then 12
+		when days_how_lt_or_erly_bsd_days between 10 and 19 and pm_punctuality_bsd_days = 'late' then 13
+		when days_how_lt_or_erly_bsd_days between 20 and 29 and pm_punctuality_bsd_days = 'late' then 14
+		when days_how_lt_or_erly_bsd_days between 30 and 39 and pm_punctuality_bsd_days = 'late' then 15
+		when days_how_lt_or_erly_bsd_days between 40 and 49 and pm_punctuality_bsd_days = 'late' then 16
+		when days_how_lt_or_erly_bsd_days between 50 and 59 and pm_punctuality_bsd_days = 'late' then 17
+		when days_how_lt_or_erly_bsd_days between 60 and 69 and pm_punctuality_bsd_days = 'late' then 18
+		when days_how_lt_or_erly_bsd_days between 70 and 79 and pm_punctuality_bsd_days = 'late' then 19
+		when days_how_lt_or_erly_bsd_days between 80 and 89 and pm_punctuality_bsd_days = 'late' then 20
+		when days_how_lt_or_erly_bsd_days >= 90 and pm_punctuality_bsd_days = 'late' then 21
+	end as clstr_id,
+	sum(interval_days) as total_interval_days,
+	sum(real_dollars_total_cost) as real_dollars_total_cost,
+	count(distinct vehicle_nbr) as vehicle_count,
+	count(vehicle_nbr) as pm_count,
+	round(sum(real_dollars_total_cost)/total_interval_days,2) as real_dollars_total_cost_p_veh_p_d,
+	sum(dwntm_days)/total_interval_days as dwntm_days_p_veh_p_d,
+	sum(nbr_brkdwns)/total_interval_days as nbr_brkdwns_p_veh_p_d
+into norm_dstrbtion_punctuality_170_bsd_days
+from pm_data_peyt_170_8_uptime
+group by
+	days_how_lt_or_erly_clstrs,
+	clstr_id
+order by
+	clstr_id,
+	days_how_lt_or_erly_clstrs;
+
+drop table norm_dstrbtion_punctuality_170_bsd_days;
+select*from norm_dstrbtion_punctuality_170_bsd_days order by clstr_id;
+
+/* Hybrid Distribution Punnett Square of Bsd Mi or Days Relevance*/
+
+select
+case 
+	when use_bsd_mi_or_days = 'use bsd mi' then case
+													when days_how_lt_or_erly_bsd_mi >= 90 and pm_punctuality_bsd_mi = 'early' then '-90+'
+													when days_how_lt_or_erly_bsd_mi between 80 and 89 and pm_punctuality_bsd_mi = 'early' then '-80 thru -89'
+													when days_how_lt_or_erly_bsd_mi between 70 and 79 and pm_punctuality_bsd_mi = 'early' then '-70 thru -79'
+													when days_how_lt_or_erly_bsd_mi between 60 and 69 and pm_punctuality_bsd_mi = 'early' then '-60 thru -69'
+													when days_how_lt_or_erly_bsd_mi between 50 and 59 and pm_punctuality_bsd_mi = 'early' then '-50 thru -59'
+													when days_how_lt_or_erly_bsd_mi between 40 and 49 and pm_punctuality_bsd_mi = 'early' then '-40 thru -49'
+													when days_how_lt_or_erly_bsd_mi between 30 and 39 and pm_punctuality_bsd_mi = 'early' then '-30 thru -39'
+													when days_how_lt_or_erly_bsd_mi between 20 and 29 and pm_punctuality_bsd_mi = 'early' then '-20 thru -29'
+													when days_how_lt_or_erly_bsd_mi between 10 and 19 and pm_punctuality_bsd_mi = 'early' then '-10 thru -19'
+													when days_how_lt_or_erly_bsd_mi between 1 and 9 and pm_punctuality_bsd_mi = 'early' then '-1 thru -9'
+													when days_how_lt_or_erly_bsd_mi between 1 and 9 and pm_punctuality_bsd_mi = 'late' then '1 thru 9'
+													when days_how_lt_or_erly_bsd_mi between 10 and 19 and pm_punctuality_bsd_mi = 'late' then '10 thru 19'
+													when days_how_lt_or_erly_bsd_mi between 20 and 29 and pm_punctuality_bsd_mi = 'late' then '20 thru 29'
+													when days_how_lt_or_erly_bsd_mi between 30 and 39 and pm_punctuality_bsd_mi = 'late' then '30 thru 39'
+													when days_how_lt_or_erly_bsd_mi between 40 and 49 and pm_punctuality_bsd_mi = 'late' then '40 thru 49'
+													when days_how_lt_or_erly_bsd_mi between 50 and 59 and pm_punctuality_bsd_mi = 'late' then '50 thru 59'
+													when days_how_lt_or_erly_bsd_mi between 60 and 69 and pm_punctuality_bsd_mi = 'late' then '60 thru 69'
+													when days_how_lt_or_erly_bsd_mi between 70 and 79 and pm_punctuality_bsd_mi = 'late' then '70 thru 79'
+													when days_how_lt_or_erly_bsd_mi between 80 and 89 and pm_punctuality_bsd_mi = 'late' then '80 thru 89'
+													when days_how_lt_or_erly_bsd_mi >= 90 and pm_punctuality_bsd_mi = 'late' then '90+'
+												end 											
+	when use_bsd_mi_or_days = 'use bsd days' then case
+													when days_how_lt_or_erly_bsd_days >= 90 and pm_punctuality_bsd_days = 'early' then '-90+'
+													when days_how_lt_or_erly_bsd_days between 80 and 89 and pm_punctuality_bsd_days = 'early' then '-80 thru -89'
+													when days_how_lt_or_erly_bsd_days between 70 and 79 and pm_punctuality_bsd_days = 'early' then '-70 thru -79'
+													when days_how_lt_or_erly_bsd_days between 60 and 69 and pm_punctuality_bsd_days = 'early' then '-60 thru -69'
+													when days_how_lt_or_erly_bsd_days between 50 and 59 and pm_punctuality_bsd_days = 'early' then '-50 thru -59'
+													when days_how_lt_or_erly_bsd_days between 40 and 49 and pm_punctuality_bsd_days = 'early' then '-40 thru -49'
+													when days_how_lt_or_erly_bsd_days between 30 and 39 and pm_punctuality_bsd_days = 'early' then '-30 thru -39'
+													when days_how_lt_or_erly_bsd_days between 20 and 29 and pm_punctuality_bsd_days = 'early' then '-20 thru -29'
+													when days_how_lt_or_erly_bsd_days between 10 and 19 and pm_punctuality_bsd_days = 'early' then '-10 thru -19'
+													when days_how_lt_or_erly_bsd_days between 1 and 9 and pm_punctuality_bsd_days = 'early' then '-1 thru -9'
+													when days_how_lt_or_erly_bsd_days = 0 and pm_punctuality_bsd_days = 'ontime' and nxt_pm_dt is not null then '0'
+													when days_how_lt_or_erly_bsd_days between 1 and 9 and pm_punctuality_bsd_days = 'late' then '1 thru 9'
+													when days_how_lt_or_erly_bsd_days between 10 and 19 and pm_punctuality_bsd_days = 'late' then '10 thru 19'
+													when days_how_lt_or_erly_bsd_days between 20 and 29 and pm_punctuality_bsd_days = 'late' then '20 thru 29'
+													when days_how_lt_or_erly_bsd_days between 30 and 39 and pm_punctuality_bsd_days = 'late' then '30 thru 39'
+													when days_how_lt_or_erly_bsd_days between 40 and 49 and pm_punctuality_bsd_days = 'late' then '40 thru 49'
+													when days_how_lt_or_erly_bsd_days between 50 and 59 and pm_punctuality_bsd_days = 'late' then '50 thru 59'
+													when days_how_lt_or_erly_bsd_days between 60 and 69 and pm_punctuality_bsd_days = 'late' then '60 thru 69'
+													when days_how_lt_or_erly_bsd_days between 70 and 79 and pm_punctuality_bsd_days = 'late' then '70 thru 79'
+													when days_how_lt_or_erly_bsd_days between 80 and 89 and pm_punctuality_bsd_days = 'late' then '80 thru 89'
+													when days_how_lt_or_erly_bsd_days >= 90 and pm_punctuality_bsd_mi = 'late' then '90+'
+												end 
+end as days_how_lt_or_erly_clstrs,
+case
+	when days_how_lt_or_erly_clstrs = '-90+' then 1
+	when days_how_lt_or_erly_clstrs = '-80 thru -89' then 2
+	when days_how_lt_or_erly_clstrs = '-70 thru -79' then 3
+	when days_how_lt_or_erly_clstrs = '-60 thru -69' then 4
+	when days_how_lt_or_erly_clstrs = '-50 thru -59' then 5
+	when days_how_lt_or_erly_clstrs = '-40 thru -49' then 6
+	when days_how_lt_or_erly_clstrs = '-30 thru -39' then 7
+	when days_how_lt_or_erly_clstrs = '-20 thru -29' then 8
+	when days_how_lt_or_erly_clstrs = '-10 thru -19' then 9
+	when days_how_lt_or_erly_clstrs = '-1 thru -9' then 10
+	when days_how_lt_or_erly_clstrs = '0' then 11
+	when days_how_lt_or_erly_clstrs = '1 thru 9' then 12
+	when days_how_lt_or_erly_clstrs = '10 thru 19' then 13
+	when days_how_lt_or_erly_clstrs = '20 thru 29' then 14
+	when days_how_lt_or_erly_clstrs = '30 thru 39' then 15
+	when days_how_lt_or_erly_clstrs = '40 thru 49' then 16
+	when days_how_lt_or_erly_clstrs = '50 thru 59' then 17
+	when days_how_lt_or_erly_clstrs = '60 thru 69' then 18
+	when days_how_lt_or_erly_clstrs = '70 thru 79' then 19
+	when days_how_lt_or_erly_clstrs = '80 thru 89' then 20
+	when days_how_lt_or_erly_clstrs = '90+' then 21
+end as clstr_id,
+	sum(interval_days) as total_interval_days,
+	sum(real_dollars_total_cost) as real_dollars_total_cost,
+	count(distinct vehicle_nbr) as vehicle_count,
+	count(vehicle_nbr) as pm_count,
+	round(avg(real_dollars_total_cost),2) as real_dollars_total_cost_p_veh_p_d,
+	avg(dwntm_days) as dwntm_days_p_veh_p_d,
+	avg(nbr_brkdwns) as nbr_brkdwns_p_veh_p_d
+into dstrbtion_punctuality_170_hybrid
+from pm_data_peyt_170_8_uptime
+group by
+	days_how_lt_or_erly_clstrs,
+	clstr_id
+order by
+	clstr_id,
+	days_how_lt_or_erly_clstrs;
+	
+drop table dstrbtion_punctuality_170_hybrid;
+select*from dstrbtion_punctuality_170_hybrid order by clstr_id;
+
+
+/* Normalized Hybrid Distribution Punnett Square of Bsd Mi or Days Relevance*/
+
+select
+case 
+	when use_bsd_mi_or_days = 'use bsd mi' then case
+													when days_how_lt_or_erly_bsd_mi >= 90 and pm_punctuality_bsd_mi = 'early' then '-90+'
+													when days_how_lt_or_erly_bsd_mi between 80 and 89 and pm_punctuality_bsd_mi = 'early' then '-80 thru -89'
+													when days_how_lt_or_erly_bsd_mi between 70 and 79 and pm_punctuality_bsd_mi = 'early' then '-70 thru -79'
+													when days_how_lt_or_erly_bsd_mi between 60 and 69 and pm_punctuality_bsd_mi = 'early' then '-60 thru -69'
+													when days_how_lt_or_erly_bsd_mi between 50 and 59 and pm_punctuality_bsd_mi = 'early' then '-50 thru -59'
+													when days_how_lt_or_erly_bsd_mi between 40 and 49 and pm_punctuality_bsd_mi = 'early' then '-40 thru -49'
+													when days_how_lt_or_erly_bsd_mi between 30 and 39 and pm_punctuality_bsd_mi = 'early' then '-30 thru -39'
+													when days_how_lt_or_erly_bsd_mi between 20 and 29 and pm_punctuality_bsd_mi = 'early' then '-20 thru -29'
+													when days_how_lt_or_erly_bsd_mi between 10 and 19 and pm_punctuality_bsd_mi = 'early' then '-10 thru -19'
+													when days_how_lt_or_erly_bsd_mi between 1 and 9 and pm_punctuality_bsd_mi = 'early' then '-1 thru -9'
+													when days_how_lt_or_erly_bsd_mi between 1 and 9 and pm_punctuality_bsd_mi = 'late' then '1 thru 9'
+													when days_how_lt_or_erly_bsd_mi between 10 and 19 and pm_punctuality_bsd_mi = 'late' then '10 thru 19'
+													when days_how_lt_or_erly_bsd_mi between 20 and 29 and pm_punctuality_bsd_mi = 'late' then '20 thru 29'
+													when days_how_lt_or_erly_bsd_mi between 30 and 39 and pm_punctuality_bsd_mi = 'late' then '30 thru 39'
+													when days_how_lt_or_erly_bsd_mi between 40 and 49 and pm_punctuality_bsd_mi = 'late' then '40 thru 49'
+													when days_how_lt_or_erly_bsd_mi between 50 and 59 and pm_punctuality_bsd_mi = 'late' then '50 thru 59'
+													when days_how_lt_or_erly_bsd_mi between 60 and 69 and pm_punctuality_bsd_mi = 'late' then '60 thru 69'
+													when days_how_lt_or_erly_bsd_mi between 70 and 79 and pm_punctuality_bsd_mi = 'late' then '70 thru 79'
+													when days_how_lt_or_erly_bsd_mi between 80 and 89 and pm_punctuality_bsd_mi = 'late' then '80 thru 89'
+													when days_how_lt_or_erly_bsd_mi >= 90 and pm_punctuality_bsd_mi = 'late' then '90+'
+												end 											
+	when use_bsd_mi_or_days = 'use bsd days' then case
+													when days_how_lt_or_erly_bsd_days >= 90 and pm_punctuality_bsd_days = 'early' then '-90+'
+													when days_how_lt_or_erly_bsd_days between 80 and 89 and pm_punctuality_bsd_days = 'early' then '-80 thru -89'
+													when days_how_lt_or_erly_bsd_days between 70 and 79 and pm_punctuality_bsd_days = 'early' then '-70 thru -79'
+													when days_how_lt_or_erly_bsd_days between 60 and 69 and pm_punctuality_bsd_days = 'early' then '-60 thru -69'
+													when days_how_lt_or_erly_bsd_days between 50 and 59 and pm_punctuality_bsd_days = 'early' then '-50 thru -59'
+													when days_how_lt_or_erly_bsd_days between 40 and 49 and pm_punctuality_bsd_days = 'early' then '-40 thru -49'
+													when days_how_lt_or_erly_bsd_days between 30 and 39 and pm_punctuality_bsd_days = 'early' then '-30 thru -39'
+													when days_how_lt_or_erly_bsd_days between 20 and 29 and pm_punctuality_bsd_days = 'early' then '-20 thru -29'
+													when days_how_lt_or_erly_bsd_days between 10 and 19 and pm_punctuality_bsd_days = 'early' then '-10 thru -19'
+													when days_how_lt_or_erly_bsd_days between 1 and 9 and pm_punctuality_bsd_days = 'early' then '-1 thru -9'
+													when days_how_lt_or_erly_bsd_days = 0 and pm_punctuality_bsd_days = 'ontime' and nxt_pm_dt  is not null then '0'
+													when days_how_lt_or_erly_bsd_days between 1 and 9 and pm_punctuality_bsd_days = 'late' then '1 thru 9'
+													when days_how_lt_or_erly_bsd_days between 10 and 19 and pm_punctuality_bsd_days = 'late' then '10 thru 19'
+													when days_how_lt_or_erly_bsd_days between 20 and 29 and pm_punctuality_bsd_days = 'late' then '20 thru 29'
+													when days_how_lt_or_erly_bsd_days between 30 and 39 and pm_punctuality_bsd_days = 'late' then '30 thru 39'
+													when days_how_lt_or_erly_bsd_days between 40 and 49 and pm_punctuality_bsd_days = 'late' then '40 thru 49'
+													when days_how_lt_or_erly_bsd_days between 50 and 59 and pm_punctuality_bsd_days = 'late' then '50 thru 59'
+													when days_how_lt_or_erly_bsd_days between 60 and 69 and pm_punctuality_bsd_days = 'late' then '60 thru 69'
+													when days_how_lt_or_erly_bsd_days between 70 and 79 and pm_punctuality_bsd_days = 'late' then '70 thru 79'
+													when days_how_lt_or_erly_bsd_days between 80 and 89 and pm_punctuality_bsd_days = 'late' then '80 thru 89'
+													when days_how_lt_or_erly_bsd_days >= 90 and pm_punctuality_bsd_mi = 'late' then '90+'
+												end 
+end as days_how_lt_or_erly_clstrs,
+case
+	when days_how_lt_or_erly_clstrs = '-90+' then 1
+	when days_how_lt_or_erly_clstrs = '-80 thru -89' then 2
+	when days_how_lt_or_erly_clstrs = '-70 thru -79' then 3
+	when days_how_lt_or_erly_clstrs = '-60 thru -69' then 4
+	when days_how_lt_or_erly_clstrs = '-50 thru -59' then 5
+	when days_how_lt_or_erly_clstrs = '-40 thru -49' then 6
+	when days_how_lt_or_erly_clstrs = '-30 thru -39' then 7
+	when days_how_lt_or_erly_clstrs = '-20 thru -29' then 8
+	when days_how_lt_or_erly_clstrs = '-10 thru -19' then 9
+	when days_how_lt_or_erly_clstrs = '-1 thru -9' then 10
+	when days_how_lt_or_erly_clstrs = '0' then 11
+	when days_how_lt_or_erly_clstrs = '1 thru 9' then 12
+	when days_how_lt_or_erly_clstrs = '10 thru 19' then 13
+	when days_how_lt_or_erly_clstrs = '20 thru 29' then 14
+	when days_how_lt_or_erly_clstrs = '30 thru 39' then 15
+	when days_how_lt_or_erly_clstrs = '40 thru 49' then 16
+	when days_how_lt_or_erly_clstrs = '50 thru 59' then 17
+	when days_how_lt_or_erly_clstrs = '60 thru 69' then 18
+	when days_how_lt_or_erly_clstrs = '70 thru 79' then 19
+	when days_how_lt_or_erly_clstrs = '80 thru 89' then 20
+	when days_how_lt_or_erly_clstrs = '90+' then 21
+end as clstr_id,
+	sum(interval_days) as total_interval_days,
+	sum(real_dollars_total_cost) as real_dollars_total_cost,
+	count(distinct vehicle_nbr) as vehicle_count,
+	count(vehicle_nbr) as pm_count,
+	round(sum(real_dollars_total_cost)/total_interval_days,2) as real_dollars_total_cost_p_veh_p_d,
+	sum(dwntm_days)/total_interval_days as dwntm_days_p_veh_p_d,
+	sum(nbr_brkdwns)/total_interval_days as nbr_brkdwns_p_veh_p_d
+into norm_dstrbtion_punctuality_170_hybrid
+from pm_data_peyt_170_8_uptime
+group by
+	days_how_lt_or_erly_clstrs,
+	clstr_id
+order by
+	clstr_id,
+	days_how_lt_or_erly_clstrs;
+	
+drop table norm_dstrbtion_punctuality_170_hybrid;
+select*from norm_dstrbtion_punctuality_170_hybrid order by clstr_id;
+
+/* Normalized Tighter Window (-60 thru 60) Hybrid Distribution Punnett Square of Bsd Mi or Days Relevance*/
+select
+case 
+	when use_bsd_mi_or_days = 'use bsd mi' then case
+													when days_how_lt_or_erly_bsd_mi between 50 and 59 and pm_punctuality_bsd_mi = 'early' then '-50 thru -60'
+													when days_how_lt_or_erly_bsd_mi between 40 and 49 and pm_punctuality_bsd_mi = 'early' then '-40 thru -49'
+													when days_how_lt_or_erly_bsd_mi between 30 and 39 and pm_punctuality_bsd_mi = 'early' then '-30 thru -39'
+													when days_how_lt_or_erly_bsd_mi between 20 and 29 and pm_punctuality_bsd_mi = 'early' then '-20 thru -29'
+													when days_how_lt_or_erly_bsd_mi between 10 and 19 and pm_punctuality_bsd_mi = 'early' then '-10 thru -19'
+													when days_how_lt_or_erly_bsd_mi between 1 and 9 and pm_punctuality_bsd_mi = 'early' then '-1 thru -9'
+													when days_how_lt_or_erly_bsd_mi between 1 and 9 and pm_punctuality_bsd_mi = 'late' then '1 thru 9'
+													when days_how_lt_or_erly_bsd_mi between 10 and 19 and pm_punctuality_bsd_mi = 'late' then '10 thru 19'
+													when days_how_lt_or_erly_bsd_mi between 20 and 29 and pm_punctuality_bsd_mi = 'late' then '20 thru 29'
+													when days_how_lt_or_erly_bsd_mi between 30 and 39 and pm_punctuality_bsd_mi = 'late' then '30 thru 39'
+													when days_how_lt_or_erly_bsd_mi between 40 and 49 and pm_punctuality_bsd_mi = 'late' then '40 thru 49'
+													when days_how_lt_or_erly_bsd_mi between 50 and 59 and pm_punctuality_bsd_mi = 'late' then '50 thru 60'
+												end
+	when use_bsd_mi_or_days = 'use bsd days' then case
+													when days_how_lt_or_erly_bsd_days between 50 and 59 and pm_punctuality_bsd_days = 'early' then '-50 thru -60'
+													when days_how_lt_or_erly_bsd_days between 40 and 49 and pm_punctuality_bsd_days = 'early' then '-40 thru -49'
+													when days_how_lt_or_erly_bsd_days between 30 and 39 and pm_punctuality_bsd_days = 'early' then '-30 thru -39'
+													when days_how_lt_or_erly_bsd_days between 20 and 29 and pm_punctuality_bsd_days = 'early' then '-20 thru -29'
+													when days_how_lt_or_erly_bsd_days between 10 and 19 and pm_punctuality_bsd_days = 'early' then '-10 thru -19'
+													when days_how_lt_or_erly_bsd_days between 1 and 9 and pm_punctuality_bsd_days = 'early' then '-1 thru -9'
+													when days_how_lt_or_erly_bsd_days = 0 and pm_punctuality_bsd_days = 'ontime' and nxt_pm_dt is not null then '0'
+													when days_how_lt_or_erly_bsd_days between 1 and 9 and pm_punctuality_bsd_days = 'late' then '1 thru 9'
+													when days_how_lt_or_erly_bsd_days between 10 and 19 and pm_punctuality_bsd_days = 'late' then '10 thru 19'
+													when days_how_lt_or_erly_bsd_days between 20 and 29 and pm_punctuality_bsd_days = 'late' then '20 thru 29'
+													when days_how_lt_or_erly_bsd_days between 30 and 39 and pm_punctuality_bsd_days = 'late' then '30 thru 39'
+													when days_how_lt_or_erly_bsd_days between 40 and 49 and pm_punctuality_bsd_days = 'late' then '40 thru 49'
+													when days_how_lt_or_erly_bsd_days between 50 and 59 and pm_punctuality_bsd_days = 'late' then '50 thru 60'
+												end 
+end as days_how_lt_or_erly_clstrs,
+case
+	when days_how_lt_or_erly_clstrs = '-50 thru -60' then 1
+	when days_how_lt_or_erly_clstrs = '-40 thru -49' then 2
+	when days_how_lt_or_erly_clstrs = '-30 thru -39' then 3
+	when days_how_lt_or_erly_clstrs = '-20 thru -29' then 4
+	when days_how_lt_or_erly_clstrs = '-10 thru -19' then 5
+	when days_how_lt_or_erly_clstrs = '-1 thru -9' then 6
+	when days_how_lt_or_erly_clstrs = '0' then 7
+	when days_how_lt_or_erly_clstrs = '1 thru 9' then 8
+	when days_how_lt_or_erly_clstrs = '10 thru 19' then 9
+	when days_how_lt_or_erly_clstrs = '20 thru 29' then 10
+	when days_how_lt_or_erly_clstrs = '30 thru 39' then 11
+	when days_how_lt_or_erly_clstrs = '40 thru 49' then 12
+	when days_how_lt_or_erly_clstrs = '50 thru 60' then 13
+end as clstr_id,
+	sum(interval_days) as total_interval_days,
+	sum(real_dollars_total_cost) as real_dollars_total_cost,
+	count(distinct vehicle_nbr) as vehicle_count,
+	count(vehicle_nbr) as pm_count,
+	round(sum(real_dollars_total_cost)/total_interval_days,2) as real_dollars_total_cost_p_veh_p_d,
+	sum(dwntm_days)/total_interval_days as dwntm_days_p_veh_p_d,
+	sum(nbr_brkdwns)/total_interval_days as nbr_brkdwns_p_veh_p_d
+into tight_norm_dstrbtion_punctuality_170_hybrid
+from pm_data_peyt_170_8_uptime
+group by
+	days_how_lt_or_erly_clstrs,
+	clstr_id
+order by
+	clstr_id,
+	days_how_lt_or_erly_clstrs;
+	
+drop table tight_norm_dstrbtion_punctuality_170_hybrid;
+select*from tight_norm_dstrbtion_punctuality_170_hybrid order by clstr_id;
+
+/* **Increased Granularity** Normalized Tighter Window (-60 thru 60) Hybrid Distribution Punnett Square of Bsd Mi or Days Relevance */
+
+select
+case 
+	when use_bsd_mi_or_days = 'use bsd mi' then case
+													when days_how_lt_or_erly_bsd_mi between 59 and 60 and pm_punctuality_bsd_mi = 'early' then '-59 thru -60'
+													when days_how_lt_or_erly_bsd_mi between 57 and 58 and pm_punctuality_bsd_mi = 'early' then '-57 thru -58'
+													when days_how_lt_or_erly_bsd_mi between 55 and 56 and pm_punctuality_bsd_mi = 'early' then '-55 thru -56'
+													when days_how_lt_or_erly_bsd_mi between 53 and 54 and pm_punctuality_bsd_mi = 'early' then '-53 thru -54'
+													when days_how_lt_or_erly_bsd_mi between 51 and 52 and pm_punctuality_bsd_mi = 'early' then '-51 thru -52'
+													when days_how_lt_or_erly_bsd_mi between 49 and 50 and pm_punctuality_bsd_mi = 'early' then '-49 thru -50'
+													when days_how_lt_or_erly_bsd_mi between 47 and 48 and pm_punctuality_bsd_mi = 'early' then '-47 thru -48'
+													when days_how_lt_or_erly_bsd_mi between 45 and 46 and pm_punctuality_bsd_mi = 'early' then '-45 thru -46'
+													when days_how_lt_or_erly_bsd_mi between 43 and 44 and pm_punctuality_bsd_mi = 'early' then '-43 thru -44'
+													when days_how_lt_or_erly_bsd_mi between 41 and 42 and pm_punctuality_bsd_mi = 'early' then '-41 thru -42'
+													when days_how_lt_or_erly_bsd_mi between 39 and 40 and pm_punctuality_bsd_mi = 'early' then '-39 thru -40'
+													when days_how_lt_or_erly_bsd_mi between 37 and 38 and pm_punctuality_bsd_mi = 'early' then '-37 thru -38'
+													when days_how_lt_or_erly_bsd_mi between 35 and 36 and pm_punctuality_bsd_mi = 'early' then '-35 thru -36'
+													when days_how_lt_or_erly_bsd_mi between 33 and 34 and pm_punctuality_bsd_mi = 'early' then '-33 thru -34'
+													when days_how_lt_or_erly_bsd_mi between 31 and 32 and pm_punctuality_bsd_mi = 'early' then '-31 thru -32'
+													when days_how_lt_or_erly_bsd_mi between 29 and 30 and pm_punctuality_bsd_mi = 'early' then '-29 thru -30'
+													when days_how_lt_or_erly_bsd_mi between 27 and 28 and pm_punctuality_bsd_mi = 'early' then '-27 thru -28'
+													when days_how_lt_or_erly_bsd_mi between 25 and 26 and pm_punctuality_bsd_mi = 'early' then '-25 thru -26'
+													when days_how_lt_or_erly_bsd_mi between 23 and 24 and pm_punctuality_bsd_mi = 'early' then '-23 thru -24'
+													when days_how_lt_or_erly_bsd_mi between 21 and 22 and pm_punctuality_bsd_mi = 'early' then '-21 thru -22'
+													when days_how_lt_or_erly_bsd_mi between 19 and 20 and pm_punctuality_bsd_mi = 'early' then '-19 thru -20'
+													when days_how_lt_or_erly_bsd_mi between 17 and 18 and pm_punctuality_bsd_mi = 'early' then '-17 thru -18'
+													when days_how_lt_or_erly_bsd_mi between 15 and 16 and pm_punctuality_bsd_mi = 'early' then '-15 thru -16'
+													when days_how_lt_or_erly_bsd_mi between 13 and 14 and pm_punctuality_bsd_mi = 'early' then '-13 thru -14'
+													when days_how_lt_or_erly_bsd_mi between 11 and 12 and pm_punctuality_bsd_mi = 'early' then '-11 thru -12'
+													when days_how_lt_or_erly_bsd_mi between 9 and 10 and pm_punctuality_bsd_mi = 'early' then '-9 thru -10'
+													when days_how_lt_or_erly_bsd_mi between 7 and 8 and pm_punctuality_bsd_mi = 'early' then '-7 thru -8'
+													when days_how_lt_or_erly_bsd_mi between 5 and 6 and pm_punctuality_bsd_mi = 'early' then '-5 thru -6'
+													when days_how_lt_or_erly_bsd_mi between 3 and 4 and pm_punctuality_bsd_mi = 'early' then '-3 thru -4'
+													when days_how_lt_or_erly_bsd_mi between 1 and 2 and pm_punctuality_bsd_mi = 'early' then '-1 thru -2'
+													when days_how_lt_or_erly_bsd_mi between 1 and 2 and pm_punctuality_bsd_mi = 'late' then '1 thru 2'
+													when days_how_lt_or_erly_bsd_mi between 3 and 4 and pm_punctuality_bsd_mi = 'late' then '3 thru 4'
+													when days_how_lt_or_erly_bsd_mi between 5 and 6 and pm_punctuality_bsd_mi = 'late' then '5 thru 6'
+													when days_how_lt_or_erly_bsd_mi between 7 and 8 and pm_punctuality_bsd_mi = 'late' then '7 thru 8'
+													when days_how_lt_or_erly_bsd_mi between 9 and 10 and pm_punctuality_bsd_mi = 'late' then '9 thru 10'
+													when days_how_lt_or_erly_bsd_mi between 11 and 12 and pm_punctuality_bsd_mi = 'late' then '11 thru 12'
+													when days_how_lt_or_erly_bsd_mi between 13 and 14 and pm_punctuality_bsd_mi = 'late' then '13 thru 14'
+													when days_how_lt_or_erly_bsd_mi between 15 and 16 and pm_punctuality_bsd_mi = 'late' then '15 thru 16'
+													when days_how_lt_or_erly_bsd_mi between 17 and 18 and pm_punctuality_bsd_mi = 'late' then '17 thru 18'
+													when days_how_lt_or_erly_bsd_mi between 19 and 20 and pm_punctuality_bsd_mi = 'late' then '19 thru 20'
+													when days_how_lt_or_erly_bsd_mi between 21 and 22 and pm_punctuality_bsd_mi = 'late' then '21 thru 22'
+													when days_how_lt_or_erly_bsd_mi between 23 and 24 and pm_punctuality_bsd_mi = 'late' then '23 thru 24'
+													when days_how_lt_or_erly_bsd_mi between 25 and 26 and pm_punctuality_bsd_mi = 'late' then '25 thru 26'
+													when days_how_lt_or_erly_bsd_mi between 27 and 28 and pm_punctuality_bsd_mi = 'late' then '27 thru 28'
+													when days_how_lt_or_erly_bsd_mi between 29 and 30 and pm_punctuality_bsd_mi = 'late' then '29 thru 30'
+													when days_how_lt_or_erly_bsd_mi between 31 and 32 and pm_punctuality_bsd_mi = 'late' then '31 thru 32'
+													when days_how_lt_or_erly_bsd_mi between 33 and 34 and pm_punctuality_bsd_mi = 'late' then '33 thru 34'
+													when days_how_lt_or_erly_bsd_mi between 35 and 36 and pm_punctuality_bsd_mi = 'late' then '35 thru 36'
+													when days_how_lt_or_erly_bsd_mi between 37 and 38 and pm_punctuality_bsd_mi = 'late' then '37 thru 38'
+													when days_how_lt_or_erly_bsd_mi between 39 and 40 and pm_punctuality_bsd_mi = 'late' then '39 thru 40'
+													when days_how_lt_or_erly_bsd_mi between 41 and 42 and pm_punctuality_bsd_mi = 'late' then '41 thru 42'
+													when days_how_lt_or_erly_bsd_mi between 43 and 44 and pm_punctuality_bsd_mi = 'late' then '43 thru 44'
+													when days_how_lt_or_erly_bsd_mi between 45 and 46 and pm_punctuality_bsd_mi = 'late' then '45 thru 46'
+													when days_how_lt_or_erly_bsd_mi between 47 and 48 and pm_punctuality_bsd_mi = 'late' then '47 thru 48'
+													when days_how_lt_or_erly_bsd_mi between 49 and 50 and pm_punctuality_bsd_mi = 'late' then '49 thru 50'
+													when days_how_lt_or_erly_bsd_mi between 51 and 52 and pm_punctuality_bsd_mi = 'late' then '51 thru 52'
+													when days_how_lt_or_erly_bsd_mi between 53 and 54 and pm_punctuality_bsd_mi = 'late' then '53 thru 54'
+													when days_how_lt_or_erly_bsd_mi between 55 and 56 and pm_punctuality_bsd_mi = 'late' then '55 thru 56'
+													when days_how_lt_or_erly_bsd_mi between 57 and 58 and pm_punctuality_bsd_mi = 'late' then '57 thru 58'
+													when days_how_lt_or_erly_bsd_mi between 59 and 60 and pm_punctuality_bsd_mi = 'late' then '59 thru 60'										
+												end
+	when use_bsd_mi_or_days = 'use bsd days' then case
+													when days_how_lt_or_erly_bsd_days between 59 and 60 and pm_punctuality_bsd_days = 'early' then '-59 thru -60'
+													when days_how_lt_or_erly_bsd_days between 57 and 58 and pm_punctuality_bsd_days = 'early' then '-57 thru -58'
+													when days_how_lt_or_erly_bsd_days between 55 and 56 and pm_punctuality_bsd_days = 'early' then '-55 thru -56'
+													when days_how_lt_or_erly_bsd_days between 53 and 54 and pm_punctuality_bsd_days = 'early' then '-53 thru -54'
+													when days_how_lt_or_erly_bsd_days between 51 and 52 and pm_punctuality_bsd_days = 'early' then '-51 thru -52'
+													when days_how_lt_or_erly_bsd_days between 49 and 50 and pm_punctuality_bsd_days = 'early' then '-49 thru -50'
+													when days_how_lt_or_erly_bsd_days between 47 and 48 and pm_punctuality_bsd_days = 'early' then '-47 thru -48'
+													when days_how_lt_or_erly_bsd_days between 45 and 46 and pm_punctuality_bsd_days = 'early' then '-45 thru -46'
+													when days_how_lt_or_erly_bsd_days between 43 and 44 and pm_punctuality_bsd_days = 'early' then '-43 thru -44'
+													when days_how_lt_or_erly_bsd_days between 41 and 42 and pm_punctuality_bsd_days = 'early' then '-41 thru -42'
+													when days_how_lt_or_erly_bsd_days between 39 and 40 and pm_punctuality_bsd_days = 'early' then '-39 thru -40'
+													when days_how_lt_or_erly_bsd_days between 37 and 38 and pm_punctuality_bsd_days = 'early' then '-37 thru -38'
+													when days_how_lt_or_erly_bsd_days between 35 and 36 and pm_punctuality_bsd_days = 'early' then '-35 thru -36'
+													when days_how_lt_or_erly_bsd_days between 33 and 34 and pm_punctuality_bsd_days = 'early' then '-33 thru -34'
+													when days_how_lt_or_erly_bsd_days between 31 and 32 and pm_punctuality_bsd_days = 'early' then '-31 thru -32'
+													when days_how_lt_or_erly_bsd_days between 29 and 30 and pm_punctuality_bsd_days = 'early' then '-29 thru -30'
+													when days_how_lt_or_erly_bsd_days between 27 and 28 and pm_punctuality_bsd_days = 'early' then '-27 thru -28'
+													when days_how_lt_or_erly_bsd_days between 25 and 26 and pm_punctuality_bsd_days = 'early' then '-25 thru -26'
+													when days_how_lt_or_erly_bsd_days between 23 and 24 and pm_punctuality_bsd_days = 'early' then '-23 thru -24'
+													when days_how_lt_or_erly_bsd_days between 21 and 22 and pm_punctuality_bsd_days = 'early' then '-21 thru -22'
+													when days_how_lt_or_erly_bsd_days between 19 and 20 and pm_punctuality_bsd_days = 'early' then '-19 thru -20'
+													when days_how_lt_or_erly_bsd_days between 17 and 18 and pm_punctuality_bsd_days = 'early' then '-17 thru -18'
+													when days_how_lt_or_erly_bsd_days between 15 and 16 and pm_punctuality_bsd_days = 'early' then '-15 thru -16'
+													when days_how_lt_or_erly_bsd_days between 13 and 14 and pm_punctuality_bsd_days = 'early' then '-13 thru -14'
+													when days_how_lt_or_erly_bsd_days between 11 and 12 and pm_punctuality_bsd_days = 'early' then '-11 thru -12'
+													when days_how_lt_or_erly_bsd_days between 9 and 10 and pm_punctuality_bsd_days = 'early' then '-9 thru -10'
+													when days_how_lt_or_erly_bsd_days between 7 and 8 and pm_punctuality_bsd_days = 'early' then '-7 thru -8'
+													when days_how_lt_or_erly_bsd_days between 5 and 6 and pm_punctuality_bsd_days = 'early' then '-5 thru -6'
+													when days_how_lt_or_erly_bsd_days between 3 and 4 and pm_punctuality_bsd_days = 'early' then '-3 thru -4'
+													when days_how_lt_or_erly_bsd_days between 1 and 2 and pm_punctuality_bsd_days = 'early' then '-1 thru -2'
+													when days_how_lt_or_erly_bsd_days = 0 and pm_punctuality_bsd_days = 'ontime' and nxt_pm_dt is not null then '0'
+													when days_how_lt_or_erly_bsd_days between 1 and 2 and pm_punctuality_bsd_days = 'late' then '1 thru 2'
+													when days_how_lt_or_erly_bsd_days between 3 and 4 and pm_punctuality_bsd_days = 'late' then '3 thru 4'
+													when days_how_lt_or_erly_bsd_days between 5 and 6 and pm_punctuality_bsd_days = 'late' then '5 thru 6'
+													when days_how_lt_or_erly_bsd_days between 7 and 8 and pm_punctuality_bsd_days = 'late' then '7 thru 8'
+													when days_how_lt_or_erly_bsd_days between 9 and 10 and pm_punctuality_bsd_days = 'late' then '9 thru 10'
+													when days_how_lt_or_erly_bsd_days between 11 and 12 and pm_punctuality_bsd_days = 'late' then '11 thru 12'
+													when days_how_lt_or_erly_bsd_days between 13 and 14 and pm_punctuality_bsd_days = 'late' then '13 thru 14'
+													when days_how_lt_or_erly_bsd_days between 15 and 16 and pm_punctuality_bsd_days = 'late' then '15 thru 16'
+													when days_how_lt_or_erly_bsd_days between 17 and 18 and pm_punctuality_bsd_days = 'late' then '17 thru 18'
+													when days_how_lt_or_erly_bsd_days between 19 and 20 and pm_punctuality_bsd_days = 'late' then '19 thru 20'
+													when days_how_lt_or_erly_bsd_days between 21 and 22 and pm_punctuality_bsd_days = 'late' then '21 thru 22'
+													when days_how_lt_or_erly_bsd_days between 23 and 24 and pm_punctuality_bsd_days = 'late' then '23 thru 24'
+													when days_how_lt_or_erly_bsd_days between 25 and 26 and pm_punctuality_bsd_days = 'late' then '25 thru 26'
+													when days_how_lt_or_erly_bsd_days between 27 and 28 and pm_punctuality_bsd_days = 'late' then '27 thru 28'
+													when days_how_lt_or_erly_bsd_days between 29 and 30 and pm_punctuality_bsd_days = 'late' then '29 thru 30'
+													when days_how_lt_or_erly_bsd_days between 31 and 32 and pm_punctuality_bsd_days = 'late' then '31 thru 32'
+													when days_how_lt_or_erly_bsd_days between 33 and 34 and pm_punctuality_bsd_days = 'late' then '33 thru 34'
+													when days_how_lt_or_erly_bsd_days between 35 and 36 and pm_punctuality_bsd_days = 'late' then '35 thru 36'
+													when days_how_lt_or_erly_bsd_days between 37 and 38 and pm_punctuality_bsd_days = 'late' then '37 thru 38'
+													when days_how_lt_or_erly_bsd_days between 39 and 40 and pm_punctuality_bsd_days = 'late' then '39 thru 40'
+													when days_how_lt_or_erly_bsd_days between 41 and 42 and pm_punctuality_bsd_days = 'late' then '41 thru 42'
+													when days_how_lt_or_erly_bsd_days between 43 and 44 and pm_punctuality_bsd_days = 'late' then '43 thru 44'
+													when days_how_lt_or_erly_bsd_days between 45 and 46 and pm_punctuality_bsd_days = 'late' then '45 thru 46'
+													when days_how_lt_or_erly_bsd_days between 47 and 48 and pm_punctuality_bsd_days = 'late' then '47 thru 48'
+													when days_how_lt_or_erly_bsd_days between 49 and 50 and pm_punctuality_bsd_days = 'late' then '49 thru 50'
+													when days_how_lt_or_erly_bsd_days between 51 and 52 and pm_punctuality_bsd_days = 'late' then '51 thru 52'
+													when days_how_lt_or_erly_bsd_days between 53 and 54 and pm_punctuality_bsd_days = 'late' then '53 thru 54'
+													when days_how_lt_or_erly_bsd_days between 55 and 56 and pm_punctuality_bsd_days = 'late' then '55 thru 56'
+													when days_how_lt_or_erly_bsd_days between 57 and 58 and pm_punctuality_bsd_days = 'late' then '57 thru 58'
+													when days_how_lt_or_erly_bsd_days between 59 and 60 and pm_punctuality_bsd_days = 'late' then '59 thru 60'
+												end 
+end as days_how_lt_or_erly_clstrs,
+case
+	when days_how_lt_or_erly_clstrs = '-59 thru -60' then 1
+	when days_how_lt_or_erly_clstrs =  '-57 thru -58' then 2
+	when days_how_lt_or_erly_clstrs = '-55 thru -56' then 3
+	when days_how_lt_or_erly_clstrs = '-53 thru -54' then 4
+	when days_how_lt_or_erly_clstrs = '-51 thru -52' then 5
+	when days_how_lt_or_erly_clstrs = '-49 thru -50' then 6
+	when days_how_lt_or_erly_clstrs = '-47 thru -48' then 7
+	when days_how_lt_or_erly_clstrs = '-45 thru -46' then 8
+	when days_how_lt_or_erly_clstrs = '-43 thru -44' then 9
+	when days_how_lt_or_erly_clstrs = '-41 thru -42' then 10
+	when days_how_lt_or_erly_clstrs = '-39 thru -40' then 11
+	when days_how_lt_or_erly_clstrs = '-37 thru -38' then 12
+	when days_how_lt_or_erly_clstrs = '-35 thru -36' then 13
+	when days_how_lt_or_erly_clstrs = '-33 thru -34' then 14
+	when days_how_lt_or_erly_clstrs = '-31 thru -32' then 15
+	when days_how_lt_or_erly_clstrs = '-29 thru -30' then 16
+	when days_how_lt_or_erly_clstrs = '-27 thru -28' then 17
+	when days_how_lt_or_erly_clstrs = '-25 thru -26' then 18
+	when days_how_lt_or_erly_clstrs = '-23 thru -24' then 19
+	when days_how_lt_or_erly_clstrs = '-21 thru -22' then 20
+	when days_how_lt_or_erly_clstrs = '-19 thru -20' then 21
+	when days_how_lt_or_erly_clstrs = '-17 thru -18' then 22
+	when days_how_lt_or_erly_clstrs = '-15 thru -16' then 23
+	when days_how_lt_or_erly_clstrs = '-13 thru -14' then 24
+	when days_how_lt_or_erly_clstrs = '-11 thru -12' then 25
+	when days_how_lt_or_erly_clstrs = '-9 thru -10' then 26
+	when days_how_lt_or_erly_clstrs = '-7 thru -8' then 27
+	when days_how_lt_or_erly_clstrs = '-5 thru -6' then 28
+	when days_how_lt_or_erly_clstrs = '-3 thru -4' then 29
+	when days_how_lt_or_erly_clstrs = '-1 thru -2' then 30
+	when days_how_lt_or_erly_clstrs = '0' then 31
+	when days_how_lt_or_erly_clstrs = '1 thru 2' then 32
+	when days_how_lt_or_erly_clstrs = '3 thru 4' then 33
+	when days_how_lt_or_erly_clstrs = '5 thru 6' then 34
+	when days_how_lt_or_erly_clstrs = '7 thru 8' then 35
+	when days_how_lt_or_erly_clstrs = '9 thru 10' then 36
+	when days_how_lt_or_erly_clstrs = '11 thru 12' then 37
+	when days_how_lt_or_erly_clstrs = '13 thru 14' then 38
+	when days_how_lt_or_erly_clstrs = '15 thru 16' then 39
+	when days_how_lt_or_erly_clstrs = '17 thru 18' then 40
+	when days_how_lt_or_erly_clstrs = '19 thru 20' then 41
+	when days_how_lt_or_erly_clstrs = '21 thru 22' then 42
+	when days_how_lt_or_erly_clstrs = '23 thru 24' then 43
+	when days_how_lt_or_erly_clstrs = '25 thru 26' then 44
+	when days_how_lt_or_erly_clstrs = '27 thru 28' then 45
+	when days_how_lt_or_erly_clstrs = '29 thru 30' then 46
+	when days_how_lt_or_erly_clstrs = '31 thru 32' then 47
+	when days_how_lt_or_erly_clstrs = '33 thru 34' then 48
+	when days_how_lt_or_erly_clstrs = '35 thru 36' then 49
+	when days_how_lt_or_erly_clstrs = '37 thru 38' then 50
+	when days_how_lt_or_erly_clstrs = '39 thru 40' then 51
+	when days_how_lt_or_erly_clstrs = '41 thru 42' then 52
+	when days_how_lt_or_erly_clstrs = '43 thru 44' then 53
+	when days_how_lt_or_erly_clstrs = '45 thru 46' then 54
+	when days_how_lt_or_erly_clstrs = '47 thru 48' then 55
+	when days_how_lt_or_erly_clstrs = '49 thru 50' then 56
+	when days_how_lt_or_erly_clstrs = '51 thru 52' then 57
+	when days_how_lt_or_erly_clstrs = '53 thru 54' then 58
+	when days_how_lt_or_erly_clstrs = '55 thru 56' then 59
+	when days_how_lt_or_erly_clstrs = '57 thru 58' then 60
+	when days_how_lt_or_erly_clstrs = '59 thru 60' then 61
+end as clstr_id,
+	sum(interval_days) as total_interval_days,
+	sum(real_dollars_total_cost) as real_dollars_total_cost,
+	count(distinct vehicle_nbr) as vehicle_count,
+	count(vehicle_nbr) as pm_count,
+	round(sum(real_dollars_total_cost)/total_interval_days,2) as real_dollars_total_cost_p_veh_p_d,
+	sum(dwntm_days)/total_interval_days as dwntm_days_p_veh_p_d,
+	sum(nbr_brkdwns)/total_interval_days as nbr_brkdwns_p_veh_p_d
+into high_gran_tight_norm_dstrbtion_punctuality_170_hybrid
+from pm_data_peyt_170_8_uptime
+group by
+	days_how_lt_or_erly_clstrs,
+	clstr_id
+order by
+	clstr_id,
+	days_how_lt_or_erly_clstrs;
+	
+drop table high_gran_tight_norm_dstrbtion_punctuality_170_hybrid;
+select*from high_gran_tight_norm_dstrbtion_punctuality_170_hybrid order by clstr_id;
